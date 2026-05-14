@@ -78,6 +78,8 @@ async def main() -> None:
     dp.include_router(nodes_router)
     dp.include_router(incidents_router)
 
+    from collections.abc import AsyncIterable
+
     from dishka import Provider, Scope
     from dishka import provide as dishka_provide
     from remnawave import RemnawaveSDK
@@ -104,7 +106,7 @@ async def main() -> None:
         @dishka_provide(scope=Scope.REQUEST)
         async def get_session(
             self, session_fac: async_sessionmaker[AsyncSession]
-        ) -> AsyncSession:
+        ) -> AsyncIterable[AsyncSession]:
             async with session_fac() as session:
                 async with session.begin():
                     yield session
