@@ -1,6 +1,7 @@
 .env
 .env.*
 .claude/
+docs/
 __pycache__/
 *.pyc
 .venv/
