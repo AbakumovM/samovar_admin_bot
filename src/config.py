@@ -1,3 +1,4 @@
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -6,6 +7,15 @@ class Config(BaseSettings):
 
     telegram_bot_token: str
     admin_ids: list[int]
+
+    @field_validator("admin_ids", mode="before")
+    @classmethod
+    def parse_admin_ids(cls, v: object) -> list[int]:
+        if isinstance(v, str):
+            return [int(x.strip()) for x in v.split(",") if x.strip()]
+        if isinstance(v, int):
+            return [v]
+        return list(v)  # type: ignore[arg-type]
     remnawave_base_url: str
     remnawave_token: str
     database_url: str
