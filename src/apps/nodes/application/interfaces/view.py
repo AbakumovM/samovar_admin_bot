@@ -1,0 +1,9 @@
+from typing import Protocol
+
+from src.apps.nodes.domain.models import NodeInfo
+
+
+class NodeView(Protocol):
+    async def get_all_nodes(self) -> list[NodeInfo]: ...
+    async def get_node_by_name(self, name: str) -> NodeInfo | None: ...
+    async def is_muted(self, node_uuid: str) -> bool: ...
