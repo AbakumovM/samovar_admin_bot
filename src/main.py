@@ -99,6 +99,7 @@ async def main() -> None:
         BotCommand(command="restart_all", description="Рестарт всех нод"),
         BotCommand(command="mute", description="Заглушить алерты: /mute <имя> 30m|1h|24h"),
         BotCommand(command="unmute", description="Снять мут: /unmute <имя>"),
+        BotCommand(command="report", description="Отчёт за последние 24 часа"),
     ])
 
     logger.info("Starting bot and monitoring loop")

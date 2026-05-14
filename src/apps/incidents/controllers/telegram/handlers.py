@@ -4,6 +4,7 @@ from aiogram.types import Message
 from dishka.integrations.aiogram import FromDishka, inject
 
 from src.apps.incidents.application.interfaces.view import IncidentView
+from src.apps.incidents.controllers.scheduler.tasks import _build_daily_report
 from src.apps.incidents.domain.models import IncidentInfo
 
 router = Router()
@@ -91,3 +92,10 @@ async def cmd_providers(message: Message, incident_view: FromDishka[IncidentView
         for prov, cnt in sorted(provider_counts.items(), key=lambda x: -x[1])
     ]
     await message.answer("📡 Инциденты по регионам (30 дней):\n" + "\n".join(lines))
+
+
+@router.message(Command("report"))
+@inject
+async def cmd_report(message: Message, incident_view: FromDishka[IncidentView]) -> None:
+    incidents = await incident_view.get_incidents_by_period(days=1)
+    await message.answer(_build_daily_report(incidents))
