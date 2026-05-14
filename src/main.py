@@ -123,6 +123,21 @@ async def main() -> None:
 
     notify = await _make_notify_fn(bot, config.admin_ids)
 
+    from aiogram.types import BotCommand
+
+    await bot.set_my_commands([
+        BotCommand(command="status", description="Состояние всех нод"),
+        BotCommand(command="node", description="Детали по ноде: /node <имя>"),
+        BotCommand(command="incidents", description="Последние инциденты"),
+        BotCommand(command="stats", description="Статистика: /stats day|week|month"),
+        BotCommand(command="worst", description="Топ проблемных нод"),
+        BotCommand(command="providers", description="Инциденты по регионам"),
+        BotCommand(command="restart", description="Рестарт ноды: /restart <имя>"),
+        BotCommand(command="restart_all", description="Рестарт всех нод"),
+        BotCommand(command="mute", description="Заглушить алерты: /mute <имя> 30m|1h|24h"),
+        BotCommand(command="unmute", description="Снять мут: /unmute <имя>"),
+    ])
+
     logger.info("Starting bot and monitoring loop")
     await asyncio.gather(
         dp.start_polling(bot),

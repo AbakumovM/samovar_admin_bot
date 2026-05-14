@@ -1,7 +1,7 @@
 from datetime import timedelta
 
 from aiogram import Router
-from aiogram.filters import Command
+from aiogram.filters import Command, CommandStart
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 from dishka.integrations.aiogram import FromDishka
 
@@ -11,6 +11,25 @@ from src.apps.nodes.domain.exceptions import NodeNotFound
 from src.apps.nodes.domain.models import NodeInfo
 
 router = Router()
+
+
+@router.message(CommandStart())
+async def cmd_start(message: Message) -> None:
+    await message.answer(
+        "👋 <b>Remnawave Admin Bot</b>\n\n"
+        "Доступные команды:\n"
+        "/status — состояние всех нод\n"
+        "/node &lt;имя&gt; — детали по ноде\n"
+        "/incidents — последние инциденты\n"
+        "/stats day|week|month — статистика\n"
+        "/worst — топ проблемных нод\n"
+        "/providers — инциденты по регионам\n"
+        "/restart &lt;имя&gt; — рестарт ноды\n"
+        "/restart_all — рестарт всех нод\n"
+        "/mute &lt;имя&gt; 30m|1h|24h — заглушить алерты\n"
+        "/unmute &lt;имя&gt; — снять мут"
+    )
+
 
 _MUTE_DURATIONS = {
     "30m": timedelta(minutes=30),
