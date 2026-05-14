@@ -24,6 +24,7 @@ async def cmd_start(message: Message) -> None:
         "/stats day|week|month — статистика\n"
         "/worst — топ проблемных нод\n"
         "/providers — инциденты по регионам\n"
+        "/report — отчёт за последние 24 часа\n"
         "/restart &lt;имя&gt; — рестарт ноды\n"
         "/restart_all — рестарт всех нод\n"
         "/mute &lt;имя&gt; 30m|1h|24h — заглушить алерты\n"
