@@ -45,6 +45,9 @@ class MonitoringLoop:
             await self._process_node(node, now)
 
     async def _process_node(self, node: NodeInfo, now: datetime) -> None:
+        if node.is_disabled:
+            return
+
         # Always record snapshot
         await self._incident_interactor.record_snapshot(
             RecordSnapshot(

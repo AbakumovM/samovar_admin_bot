@@ -75,9 +75,6 @@ async def main() -> None:
     bot = create_bot(config)
     dp: Dispatcher = create_dispatcher(config)
 
-    dp.include_router(nodes_router)
-    dp.include_router(incidents_router)
-
     from collections.abc import AsyncIterable
 
     from dishka import Provider, Scope
@@ -120,6 +117,9 @@ async def main() -> None:
         IncidentInteractorsProvider(),
     )
     setup_dishka(container=container, router=dp)
+
+    dp.include_router(nodes_router)
+    dp.include_router(incidents_router)
 
     notify = await _make_notify_fn(bot, config.admin_ids)
 
