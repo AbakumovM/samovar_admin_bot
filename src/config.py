@@ -23,3 +23,4 @@ class Config(BaseSettings):
     fast_poll_interval_seconds: int = 30
     escalation_window_minutes: int = 60
     escalation_max_attempts: int = 3
+    daily_report_hour_utc: int = 17  # 20:00 MSK

@@ -5,14 +5,10 @@ from aiogram import Bot, Dispatcher
 from dishka import make_async_container
 from dishka.integrations.aiogram import setup_dishka
 
-from src.apps.incidents.adapters.gateway import PostgresIncidentGateway
-from src.apps.incidents.adapters.view import PostgresIncidentView
-from src.apps.incidents.application.interactor import IncidentInteractor
+from src.apps.incidents.controllers.scheduler.tasks import daily_report_task
 from src.apps.incidents.controllers.telegram.handlers import router as incidents_router
 from src.apps.incidents.ioc import IncidentAdaptersProvider, IncidentInteractorsProvider
-from src.apps.nodes.adapters.gateway import RemnaWaveNodeGateway
-from src.apps.nodes.adapters.view import RemnaWaveNodeView
-from src.apps.nodes.controllers.scheduler.loop import MonitoringLoop
+from src.apps.nodes.controllers.scheduler.tasks import fast_monitoring_task, monitoring_task
 from src.apps.nodes.controllers.telegram.handlers import router as nodes_router
 from src.apps.nodes.ioc import NodeAdaptersProvider, NodeInteractorsProvider
 from src.config import Config
@@ -34,64 +30,6 @@ async def _make_notify_fn(bot: Bot, admin_ids: list[int]):  # type: ignore[no-un
                 logger.error("Failed to notify admin %s: %s", admin_id, e)
 
     return notify
-
-
-async def _monitoring_task(
-    config: Config,
-    session_factory,  # type: ignore[no-untyped-def]
-    sdk,  # type: ignore[no-untyped-def]
-    notify,  # type: ignore[no-untyped-def]
-) -> None:
-    logger.info("Starting monitoring loop (interval=%ds)", config.poll_interval_seconds)
-    while True:
-        try:
-            async with session_factory() as session:
-                async with session.begin():
-                    loop = MonitoringLoop(
-                        node_view=RemnaWaveNodeView(sdk=sdk, session=session),
-                        node_gateway=RemnaWaveNodeGateway(sdk=sdk, session=session),
-                        incident_interactor=IncidentInteractor(
-                            gateway=PostgresIncidentGateway(session=session),
-                            view=PostgresIncidentView(session=session),
-                        ),
-                        incident_view=PostgresIncidentView(session=session),
-                        notify=notify,
-                        escalation_window_minutes=config.escalation_window_minutes,
-                        escalation_max_attempts=config.escalation_max_attempts,
-                    )
-                    await loop.poll()
-        except Exception as e:
-            logger.error("Monitoring poll error: %s", e)
-        await asyncio.sleep(config.poll_interval_seconds)
-
-
-async def _fast_monitoring_task(
-    config: Config,
-    session_factory,  # type: ignore[no-untyped-def]
-    sdk,  # type: ignore[no-untyped-def]
-    notify,  # type: ignore[no-untyped-def]
-) -> None:
-    logger.info("Starting fast monitoring loop (interval=%ds)", config.fast_poll_interval_seconds)
-    while True:
-        await asyncio.sleep(config.fast_poll_interval_seconds)
-        try:
-            async with session_factory() as session:
-                async with session.begin():
-                    loop = MonitoringLoop(
-                        node_view=RemnaWaveNodeView(sdk=sdk, session=session),
-                        node_gateway=RemnaWaveNodeGateway(sdk=sdk, session=session),
-                        incident_interactor=IncidentInteractor(
-                            gateway=PostgresIncidentGateway(session=session),
-                            view=PostgresIncidentView(session=session),
-                        ),
-                        incident_view=PostgresIncidentView(session=session),
-                        notify=notify,
-                        escalation_window_minutes=config.escalation_window_minutes,
-                        escalation_max_attempts=config.escalation_max_attempts,
-                    )
-                    await loop.poll_offline()
-        except Exception as e:
-            logger.error("Fast monitoring poll error: %s", e)
 
 
 async def main() -> None:
@@ -122,9 +60,7 @@ async def main() -> None:
 
     class SessionProvider(Provider):
         @dishka_provide(scope=Scope.APP)
-        async def get_session_factory(
-            self, eng: AsyncEngine
-        ) -> async_sessionmaker[AsyncSession]:
+        async def get_session_factory(self) -> async_sessionmaker[AsyncSession]:
             return session_factory
 
         @dishka_provide(scope=Scope.REQUEST)
@@ -168,8 +104,9 @@ async def main() -> None:
     logger.info("Starting bot and monitoring loop")
     await asyncio.gather(
         dp.start_polling(bot),
-        _monitoring_task(config, session_factory, sdk, notify),
-        _fast_monitoring_task(config, session_factory, sdk, notify),
+        monitoring_task(config, session_factory, sdk, notify),
+        fast_monitoring_task(config, session_factory, sdk, notify),
+        daily_report_task(config, session_factory, notify),
     )
 
 
