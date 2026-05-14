@@ -1,7 +1,7 @@
 from aiogram import Router
 from aiogram.filters import Command
 from aiogram.types import Message
-from dishka.integrations.aiogram import FromDishka
+from dishka.integrations.aiogram import FromDishka, inject
 
 from src.apps.incidents.application.interfaces.view import IncidentView
 from src.apps.incidents.domain.models import IncidentInfo
@@ -23,6 +23,7 @@ def _fmt_incident(inc: IncidentInfo) -> str:
 
 
 @router.message(Command("incidents"))
+@inject
 async def cmd_incidents(message: Message, incident_view: FromDishka[IncidentView]) -> None:
     incidents = await incident_view.get_recent_incidents(limit=10)
     if not incidents:
@@ -33,6 +34,7 @@ async def cmd_incidents(message: Message, incident_view: FromDishka[IncidentView
 
 
 @router.message(Command("stats"))
+@inject
 async def cmd_stats(message: Message, incident_view: FromDishka[IncidentView]) -> None:
     parts = (message.text or "").split()
     period_map = {"day": 1, "week": 7, "month": 30}
@@ -59,6 +61,7 @@ async def cmd_stats(message: Message, incident_view: FromDishka[IncidentView]) -
 
 
 @router.message(Command("worst"))
+@inject
 async def cmd_worst(message: Message, incident_view: FromDishka[IncidentView]) -> None:
     worst = await incident_view.get_worst_nodes(days=30, limit=5)
     if not worst:
@@ -71,6 +74,7 @@ async def cmd_worst(message: Message, incident_view: FromDishka[IncidentView]) -
 
 
 @router.message(Command("providers"))
+@inject
 async def cmd_providers(message: Message, incident_view: FromDishka[IncidentView]) -> None:
     incidents = await incident_view.get_incidents_by_period(days=30)
     provider_counts: dict[str, int] = {}

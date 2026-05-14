@@ -3,7 +3,7 @@ from datetime import timedelta
 from aiogram import Router
 from aiogram.filters import Command, CommandStart
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
-from dishka.integrations.aiogram import FromDishka
+from dishka.integrations.aiogram import FromDishka, inject
 
 from src.apps.nodes.application.interactor import NodeInteractor
 from src.apps.nodes.application.interfaces.view import NodeView
@@ -69,6 +69,7 @@ def _format_node_detail(node: NodeInfo) -> str:
 
 
 @router.message(Command("status"))
+@inject
 async def cmd_status(message: Message, node_view: FromDishka[NodeView]) -> None:
     nodes = await node_view.get_all_nodes()
     if not nodes:
@@ -79,6 +80,7 @@ async def cmd_status(message: Message, node_view: FromDishka[NodeView]) -> None:
 
 
 @router.message(Command("node"))
+@inject
 async def cmd_node(message: Message, node_view: FromDishka[NodeView]) -> None:
     parts = (message.text or "").split(maxsplit=1)
     if len(parts) < 2:
@@ -93,6 +95,7 @@ async def cmd_node(message: Message, node_view: FromDishka[NodeView]) -> None:
 
 
 @router.message(Command("restart"))
+@inject
 async def cmd_restart(
     message: Message, node_interactor: FromDishka[NodeInteractor]
 ) -> None:
@@ -125,6 +128,7 @@ async def cmd_restart_all(message: Message) -> None:
 
 
 @router.callback_query(lambda c: c.data == "confirm_restart_all")
+@inject
 async def callback_restart_all(
     callback: CallbackQuery,
     node_view: FromDishka[NodeView],
@@ -148,6 +152,7 @@ async def callback_cancel_restart_all(callback: CallbackQuery) -> None:
 
 
 @router.message(Command("mute"))
+@inject
 async def cmd_mute(
     message: Message,
     node_view: FromDishka[NodeView],
@@ -172,6 +177,7 @@ async def cmd_mute(
 
 
 @router.message(Command("unmute"))
+@inject
 async def cmd_unmute(
     message: Message, node_interactor: FromDishka[NodeInteractor]
 ) -> None:

@@ -47,16 +47,14 @@ async def _monitoring_task(
         try:
             async with session_factory() as session:
                 async with session.begin():
-                    node_gw = RemnaWaveNodeGateway(sdk=sdk, session=session)
-                    node_vw = RemnaWaveNodeView(sdk=sdk, session=session)
-                    inc_gw = PostgresIncidentGateway(session=session)
-                    inc_vw = PostgresIncidentView(session=session)
-                    inc_interactor = IncidentInteractor(gateway=inc_gw, view=inc_vw)
                     loop = MonitoringLoop(
-                        node_view=node_vw,
-                        node_gateway=node_gw,
-                        incident_interactor=inc_interactor,
-                        incident_view=inc_vw,
+                        node_view=RemnaWaveNodeView(sdk=sdk, session=session),
+                        node_gateway=RemnaWaveNodeGateway(sdk=sdk, session=session),
+                        incident_interactor=IncidentInteractor(
+                            gateway=PostgresIncidentGateway(session=session),
+                            view=PostgresIncidentView(session=session),
+                        ),
+                        incident_view=PostgresIncidentView(session=session),
                         notify=notify,
                         escalation_window_minutes=config.escalation_window_minutes,
                         escalation_max_attempts=config.escalation_max_attempts,
@@ -65,6 +63,35 @@ async def _monitoring_task(
         except Exception as e:
             logger.error("Monitoring poll error: %s", e)
         await asyncio.sleep(config.poll_interval_seconds)
+
+
+async def _fast_monitoring_task(
+    config: Config,
+    session_factory,  # type: ignore[no-untyped-def]
+    sdk,  # type: ignore[no-untyped-def]
+    notify,  # type: ignore[no-untyped-def]
+) -> None:
+    logger.info("Starting fast monitoring loop (interval=%ds)", config.fast_poll_interval_seconds)
+    while True:
+        await asyncio.sleep(config.fast_poll_interval_seconds)
+        try:
+            async with session_factory() as session:
+                async with session.begin():
+                    loop = MonitoringLoop(
+                        node_view=RemnaWaveNodeView(sdk=sdk, session=session),
+                        node_gateway=RemnaWaveNodeGateway(sdk=sdk, session=session),
+                        incident_interactor=IncidentInteractor(
+                            gateway=PostgresIncidentGateway(session=session),
+                            view=PostgresIncidentView(session=session),
+                        ),
+                        incident_view=PostgresIncidentView(session=session),
+                        notify=notify,
+                        escalation_window_minutes=config.escalation_window_minutes,
+                        escalation_max_attempts=config.escalation_max_attempts,
+                    )
+                    await loop.poll_offline()
+        except Exception as e:
+            logger.error("Fast monitoring poll error: %s", e)
 
 
 async def main() -> None:
@@ -142,6 +169,7 @@ async def main() -> None:
     await asyncio.gather(
         dp.start_polling(bot),
         _monitoring_task(config, session_factory, sdk, notify),
+        _fast_monitoring_task(config, session_factory, sdk, notify),
     )
 
 

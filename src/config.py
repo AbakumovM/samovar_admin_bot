@@ -20,5 +20,6 @@ class Config(BaseSettings):
     remnawave_token: str
     database_url: str
     poll_interval_seconds: int = 120
+    fast_poll_interval_seconds: int = 30
     escalation_window_minutes: int = 60
     escalation_max_attempts: int = 3

@@ -44,6 +44,21 @@ class MonitoringLoop:
         for node in nodes:
             await self._process_node(node, now)
 
+    async def poll_offline(self) -> None:
+        """Fast poll: process only nodes with open incidents (no snapshot recording)."""
+        now = datetime.now(timezone.utc)
+        nodes = await self._node_view.get_all_nodes()
+        for node in nodes:
+            if node.is_disabled:
+                continue
+            open_incident = await self._incident_view.get_open_incident(node.uuid)
+            if open_incident is None:
+                continue
+            if node.is_connected:
+                await self._handle_online_node(node, now)
+            else:
+                await self._handle_offline_node(node, now)
+
     async def _process_node(self, node: NodeInfo, now: datetime) -> None:
         if node.is_disabled:
             return
@@ -69,46 +84,40 @@ class MonitoringLoop:
         if await self._node_view.is_muted(node.uuid):
             return
 
-        recent_count = await self._incident_view.count_recent_incidents(
-            node.uuid, self._escalation_window_minutes
-        )
+        open_incident = await self._incident_view.get_open_incident(node.uuid)
+        if open_incident is None:
+            open_incident = await self._incident_interactor.open_incident(
+                OpenIncident(
+                    node_uuid=node.uuid,
+                    node_name=node.name,
+                    started_at=now,
+                    last_status_message=node.last_status_message,
+                )
+            )
 
-        if recent_count >= self._escalation_max_attempts:
-            # Escalate existing open incident
-            open_incident = await self._incident_view.get_open_incident(node.uuid)
-            if open_incident and not open_incident.escalated:
+        if open_incident.restart_attempts >= self._escalation_max_attempts:
+            if not open_incident.escalated:
                 await self._incident_interactor.escalate_incident(
                     EscalateIncident(incident_id=open_incident.id)
                 )
                 await self._notify(
                     f"🚨 [{node.name}] не поднимается после "
-                    f"{self._escalation_max_attempts} попыток за час. "
+                    f"{self._escalation_max_attempts} попыток. "
                     f"Требуется ручное вмешательство!\n"
                     f"Причина: {node.last_status_message}"
                 )
-        else:
-            # Open new incident if none exists
-            open_incident = await self._incident_view.get_open_incident(node.uuid)
-            if open_incident is None:
-                open_incident = await self._incident_interactor.open_incident(
-                    OpenIncident(
-                        node_uuid=node.uuid,
-                        node_name=node.name,
-                        started_at=now,
-                        last_status_message=node.last_status_message,
-                    )
-                )
+            return
 
-            attempt_num = recent_count + 1
-            await self._node_gateway.restart_node(node.uuid)
-            await self._incident_interactor.record_restart_attempt(
-                RecordRestartAttempt(incident_id=open_incident.id)
-            )
-            await self._notify(
-                f"🔴 [{node.name}] упала. "
-                f"Причина: {node.last_status_message}\n"
-                f"Перезапуск (попытка {attempt_num}/{self._escalation_max_attempts})"
-            )
+        attempt_num = open_incident.restart_attempts + 1
+        await self._node_gateway.restart_node(node.uuid)
+        await self._incident_interactor.record_restart_attempt(
+            RecordRestartAttempt(incident_id=open_incident.id)
+        )
+        await self._notify(
+            f"🔴 [{node.name}] упала. "
+            f"Причина: {node.last_status_message}\n"
+            f"Перезапуск (попытка {attempt_num}/{self._escalation_max_attempts})"
+        )
 
     async def _handle_online_node(self, node: NodeInfo, now: datetime) -> None:
         open_incident = await self._incident_view.get_open_incident(node.uuid)
