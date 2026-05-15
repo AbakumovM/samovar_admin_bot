@@ -25,5 +25,5 @@ class Config(BaseSettings):
     escalation_max_attempts: int = 3
     daily_report_hour_utc: int = 17  # 20:00 MSK
     traffic_check_interval_seconds: int = 3600
-    traffic_anomaly_threshold_gb: float = 50.0
-    traffic_anomaly_multiplier: float = 3.0
+    traffic_anomaly_threshold_gb: float = 30.0
+    traffic_anomaly_multiplier: float = 2.0

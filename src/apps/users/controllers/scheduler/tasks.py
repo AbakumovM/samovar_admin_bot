@@ -26,16 +26,21 @@ def _compute_delta(current: int, previous: int) -> int | None:
     return delta
 
 
-def _is_anomaly(
+def _check_anomaly(
     bytes_today: int,
     avg_daily_bytes: float,
     threshold_bytes: int,
     multiplier: float,
-) -> bool:
-    """True when BOTH absolute threshold AND multiplier conditions are met."""
-    if avg_daily_bytes == 0:
-        return False
-    return bytes_today > threshold_bytes and bytes_today > multiplier * avg_daily_bytes
+) -> tuple[bool, bool]:
+    """Return (is_high, is_spike). Independent checks — either triggers an alert.
+
+    is_high: today > threshold_bytes (absolute — catches stable heavy users)
+    is_spike: today > multiplier * avg (relative — catches sudden surges)
+              Only fires when avg history exists (avg > 0).
+    """
+    is_high = bytes_today > threshold_bytes
+    is_spike = avg_daily_bytes > 0 and bytes_today > multiplier * avg_daily_bytes
+    return is_high, is_spike
 
 
 def _fmt_bytes(b: int) -> str:
@@ -134,25 +139,31 @@ async def _run_traffic_check(
                     )
                     break
                 avg_bytes = await view.get_avg_daily_7d(record.user_uuid)
-                if not _is_anomaly(
+                is_high, is_spike = _check_anomaly(
                     bytes_today=record.bytes_consumed,
                     avg_daily_bytes=avg_bytes,
                     threshold_bytes=threshold_bytes,
                     multiplier=config.traffic_anomaly_multiplier,
-                ):
+                )
+                if not is_high and not is_spike:
                     continue
                 await gateway.mark_anomaly_alerted(
                     MarkAnomalyAlerted(user_uuid=record.user_uuid, date=today)
                 )
-                multiplier_actual = (
-                    record.bytes_consumed / avg_bytes if avg_bytes > 0 else 0
-                )
                 safe_username = html.escape(record.username)
+                labels: list[str] = []
+                if is_high:
+                    labels.append(f"Высокое потребление (>{_fmt_bytes(threshold_bytes)}/день)")
+                if is_spike:
+                    multiplier_actual = record.bytes_consumed / avg_bytes
+                    labels.append(
+                        f"Резкий скачок ×{multiplier_actual:.1f} "
+                        f"(обычно ~{_fmt_bytes(int(avg_bytes))}/день)"
+                    )
                 await notify(
                     f"⚠️ Аномальный трафик: <b>{safe_username}</b>\n"
-                    f"Сегодня: {_fmt_bytes(record.bytes_consumed)} | "
-                    f"Обычно: ~{_fmt_bytes(int(avg_bytes))}/день "
-                    f"(×{multiplier_actual:.1f})"
+                    f"Сегодня: {_fmt_bytes(record.bytes_consumed)}\n"
+                    + "\n".join(f"• {label}" for label in labels)
                 )
                 anomaly_count += 1
 

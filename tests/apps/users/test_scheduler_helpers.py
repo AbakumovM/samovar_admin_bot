@@ -1,5 +1,4 @@
-import pytest
-from src.apps.users.controllers.scheduler.tasks import _compute_delta, _is_anomaly
+from src.apps.users.controllers.scheduler.tasks import _compute_delta, _check_anomaly
 
 
 def test_compute_delta_positive() -> None:
@@ -15,41 +14,73 @@ def test_compute_delta_negative_reset() -> None:
     assert _compute_delta(current=500, previous=1000) is None
 
 
-def test_is_anomaly_both_conditions_true() -> None:
-    # 60 GB today, threshold=50 GB, avg=10 GB/day, multiplier=3.0 → 60 > 50 AND 60 > 30
-    assert _is_anomaly(
-        bytes_today=60 * 1024**3,
-        avg_daily_bytes=10 * 1024**3,
-        threshold_bytes=50 * 1024**3,
-        multiplier=3.0,
-    ) is True
-
-
-def test_is_anomaly_below_threshold() -> None:
-    # 30 GB today (below 50 GB threshold) even though 3× average
-    assert _is_anomaly(
-        bytes_today=30 * 1024**3,
-        avg_daily_bytes=5 * 1024**3,
-        threshold_bytes=50 * 1024**3,
-        multiplier=3.0,
-    ) is False
-
-
-def test_is_anomaly_below_multiplier() -> None:
-    # 60 GB today, avg=30 GB/day → only 2× average, below 3× threshold
-    assert _is_anomaly(
-        bytes_today=60 * 1024**3,
-        avg_daily_bytes=30 * 1024**3,
-        threshold_bytes=50 * 1024**3,
-        multiplier=3.0,
-    ) is False
-
-
-def test_is_anomaly_zero_average() -> None:
-    # No history — never flag as anomaly
-    assert _is_anomaly(
-        bytes_today=100 * 1024**3,
+def test_check_anomaly_high_only() -> None:
+    # 35 GB today, above 30 GB threshold, but no history (avg=0)
+    is_high, is_spike = _check_anomaly(
+        bytes_today=35 * 1024**3,
         avg_daily_bytes=0,
-        threshold_bytes=50 * 1024**3,
-        multiplier=3.0,
-    ) is False
+        threshold_bytes=30 * 1024**3,
+        multiplier=2.0,
+    )
+    assert is_high is True
+    assert is_spike is False
+
+
+def test_check_anomaly_spike_only() -> None:
+    # 20 GB today (below 30 GB threshold), but 3× average (avg=6 GB)
+    is_high, is_spike = _check_anomaly(
+        bytes_today=20 * 1024**3,
+        avg_daily_bytes=6 * 1024**3,
+        threshold_bytes=30 * 1024**3,
+        multiplier=2.0,
+    )
+    assert is_high is False
+    assert is_spike is True
+
+
+def test_check_anomaly_both() -> None:
+    # 60 GB today, above 30 GB threshold AND 4× average (avg=15 GB)
+    is_high, is_spike = _check_anomaly(
+        bytes_today=60 * 1024**3,
+        avg_daily_bytes=15 * 1024**3,
+        threshold_bytes=30 * 1024**3,
+        multiplier=2.0,
+    )
+    assert is_high is True
+    assert is_spike is True
+
+
+def test_check_anomaly_neither() -> None:
+    # 10 GB today, below threshold, below multiplier
+    is_high, is_spike = _check_anomaly(
+        bytes_today=10 * 1024**3,
+        avg_daily_bytes=8 * 1024**3,
+        threshold_bytes=30 * 1024**3,
+        multiplier=2.0,
+    )
+    assert is_high is False
+    assert is_spike is False
+
+
+def test_check_anomaly_stable_heavy_user() -> None:
+    # User consistently uses 50 GB/day — high but NOT a spike
+    is_high, is_spike = _check_anomaly(
+        bytes_today=50 * 1024**3,
+        avg_daily_bytes=50 * 1024**3,
+        threshold_bytes=30 * 1024**3,
+        multiplier=2.0,
+    )
+    assert is_high is True   # still flagged as high
+    assert is_spike is False  # not a spike (matches their norm)
+
+
+def test_check_anomaly_zero_average_no_spike() -> None:
+    # No history — spike check disabled, only threshold applies
+    is_high, is_spike = _check_anomaly(
+        bytes_today=5 * 1024**3,
+        avg_daily_bytes=0,
+        threshold_bytes=30 * 1024**3,
+        multiplier=2.0,
+    )
+    assert is_high is False
+    assert is_spike is False
