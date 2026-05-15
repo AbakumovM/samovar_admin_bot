@@ -60,7 +60,7 @@ async def _fetch_all_users(sdk: RemnawaveSDK) -> list[object]:
         batch = page.users  # type: ignore[attr-defined]  # SDK returns untyped response DTO
         if not batch:
             break  # Safety guard: stop if API returns empty page
-        active = [u for u in batch if getattr(u, "status", None) == "active"]
+        active = [u for u in batch if str(getattr(u, "status", "")).lower() == "active"]
         users.extend(active)
         if start + size >= page.total:  # type: ignore[attr-defined]  # SDK returns untyped response DTO
             break
