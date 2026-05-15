@@ -6,6 +6,7 @@ from dishka.integrations.aiogram import FromDishka, inject
 from src.apps.incidents.application.interfaces.view import IncidentView
 from src.apps.incidents.controllers.scheduler.tasks import _build_daily_report
 from src.apps.incidents.domain.models import IncidentInfo
+from src.apps.users.application.interfaces.view import UserTrafficView
 
 router = Router()
 
@@ -96,6 +97,11 @@ async def cmd_providers(message: Message, incident_view: FromDishka[IncidentView
 
 @router.message(Command("report"))
 @inject
-async def cmd_report(message: Message, incident_view: FromDishka[IncidentView]) -> None:
+async def cmd_report(
+    message: Message,
+    incident_view: FromDishka[IncidentView],
+    user_traffic_view: FromDishka[UserTrafficView],
+) -> None:
     incidents = await incident_view.get_incidents_by_period(days=1)
-    await message.answer(_build_daily_report(incidents))
+    top_traffic = await user_traffic_view.get_top_traffic_today(limit=5)
+    await message.answer(_build_daily_report(incidents, top_traffic=top_traffic))

@@ -11,6 +11,9 @@ from src.apps.incidents.ioc import IncidentAdaptersProvider, IncidentInteractors
 from src.apps.nodes.controllers.scheduler.tasks import fast_monitoring_task, monitoring_task
 from src.apps.nodes.controllers.telegram.handlers import router as nodes_router
 from src.apps.nodes.ioc import NodeAdaptersProvider, NodeInteractorsProvider
+from src.apps.users.controllers.scheduler.tasks import traffic_monitoring_task
+from src.apps.users.controllers.telegram.handlers import router as users_router
+from src.apps.users.ioc import UserTrafficAdaptersProvider, UserTrafficInteractorsProvider
 from src.config import Config
 from src.infrastructure.db.engine import create_engine
 from src.infrastructure.db.session import create_session_factory
@@ -78,11 +81,14 @@ async def main() -> None:
         NodeInteractorsProvider(),
         IncidentAdaptersProvider(),
         IncidentInteractorsProvider(),
+        UserTrafficAdaptersProvider(),
+        UserTrafficInteractorsProvider(),
     )
     setup_dishka(container=container, router=dp)
 
     dp.include_router(nodes_router)
     dp.include_router(incidents_router)
+    dp.include_router(users_router)
 
     notify = await _make_notify_fn(bot, config.admin_ids)
 
@@ -100,6 +106,9 @@ async def main() -> None:
         BotCommand(command="mute", description="Заглушить алерты: /mute <имя> 30m|1h|24h"),
         BotCommand(command="unmute", description="Снять мут: /unmute <имя>"),
         BotCommand(command="report", description="Отчёт за последние 24 часа"),
+        BotCommand(command="top_traffic", description="Топ потребителей: /top_traffic day|week|month"),
+        BotCommand(command="anomalies", description="Аномалии трафика сегодня"),
+        BotCommand(command="user_traffic", description="Трафик пользователя: /user_traffic <имя>"),
     ])
 
     logger.info("Starting bot and monitoring loop")
@@ -108,6 +117,7 @@ async def main() -> None:
         monitoring_task(config, session_factory, sdk, notify),
         fast_monitoring_task(config, session_factory, sdk, notify),
         daily_report_task(config, session_factory, notify),
+        traffic_monitoring_task(config, session_factory, sdk, notify),
     )
 
 

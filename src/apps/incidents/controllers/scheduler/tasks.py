@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from src.apps.incidents.adapters.view import PostgresIncidentView
 from src.apps.incidents.domain.models import IncidentInfo
+from src.apps.users.domain.models import UserTrafficDailyInfo
 from src.config import Config
 
 logger = logging.getLogger(__name__)
@@ -15,7 +16,10 @@ logger = logging.getLogger(__name__)
 NotifyFn = Callable[[str], Coroutine[Any, Any, None]]
 
 
-def _build_daily_report(incidents: list[IncidentInfo]) -> str:
+def _build_daily_report(
+    incidents: list[IncidentInfo],
+    top_traffic: list[UserTrafficDailyInfo] | None = None,
+) -> str:
     date_str = datetime.now(timezone.utc).strftime("%d.%m.%Y")
     if not incidents:
         return f"📊 Ежедневный отчёт — {date_str}\n\nЗа прошедшие сутки инцидентов не было. ✅"
@@ -47,6 +51,13 @@ def _build_daily_report(incidents: list[IncidentInfo]) -> str:
         for reason in reasons:
             lines.append(f"  Причина: {reason}")
 
+    if top_traffic:
+        lines.append("\n📈 Топ-5 потребителей дня:")
+        for i, rec in enumerate(top_traffic[:5], 1):
+            gb = rec.bytes_consumed / 1024**3
+            anomaly = " ⚠️" if rec.anomaly_alerted else ""
+            lines.append(f"  {i}. {rec.username} — {gb:.1f} GB{anomaly}")
+
     return "\n".join(lines)
 
 
@@ -71,11 +82,15 @@ async def daily_report_task(
         await asyncio.sleep(sleep_seconds)
 
         try:
+            from src.apps.users.adapters.view import PostgresUserTrafficView
+
             async with session_factory() as session:
                 async with session.begin():
                     view = PostgresIncidentView(session=session)
                     incidents = await view.get_incidents_by_period(days=1)
-            report = _build_daily_report(incidents)
+                    traffic_view = PostgresUserTrafficView(session=session)
+                    top_traffic = await traffic_view.get_top_traffic_today(limit=5)
+            report = _build_daily_report(incidents, top_traffic=top_traffic)
             await notify(report)
         except Exception as e:
             logger.error("Daily report error: %s", e)
