@@ -60,8 +60,9 @@ async def _fetch_all_users(sdk: RemnawaveSDK) -> list[object]:
         batch = page.users  # type: ignore[attr-defined]  # SDK returns untyped response DTO
         if not batch:
             break  # Safety guard: stop if API returns empty page
-        users.extend(batch)
-        if len(users) >= page.total:  # type: ignore[attr-defined]  # SDK returns untyped response DTO
+        active = [u for u in batch if getattr(u, "status", None) == "active"]
+        users.extend(active)
+        if start + size >= page.total:  # type: ignore[attr-defined]  # SDK returns untyped response DTO
             break
         start += size
     return users
@@ -78,7 +79,7 @@ async def _run_traffic_check(
     threshold_bytes = int(config.traffic_anomaly_threshold_gb * 1024**3)
 
     users = await _fetch_all_users(sdk)
-    logger.debug("Traffic check: fetched %d users", len(users))
+    logger.info("Traffic check: %d active users to process", len(users))
 
     # Transaction 1: process user snapshots and daily traffic
     async with session_factory() as session:
