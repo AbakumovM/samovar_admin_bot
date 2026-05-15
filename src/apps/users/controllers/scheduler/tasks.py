@@ -1,0 +1,149 @@
+import asyncio
+import logging
+from collections.abc import Callable, Coroutine
+from datetime import datetime, timezone
+from typing import Any
+
+from remnawave import RemnawaveSDK
+from sqlalchemy.ext.asyncio import async_sessionmaker
+
+from src.apps.users.adapters.gateway import PostgresUserTrafficGateway
+from src.apps.users.adapters.view import PostgresUserTrafficView
+from src.apps.users.domain.commands import MarkAnomalyAlerted, UpdateLastSnapshot, UpsertDailyTraffic
+from src.config import Config
+
+logger = logging.getLogger(__name__)
+
+NotifyFn = Callable[[str], Coroutine[Any, Any, None]]
+
+
+def _compute_delta(current: int, previous: int) -> int | None:
+    """Return bytes consumed since last snapshot. None means counter was reset."""
+    delta = current - previous
+    if delta < 0:
+        return None
+    return delta
+
+
+def _is_anomaly(
+    bytes_today: int,
+    avg_daily_bytes: float,
+    threshold_bytes: int,
+    multiplier: float,
+) -> bool:
+    """True when BOTH absolute threshold AND multiplier conditions are met."""
+    if avg_daily_bytes == 0:
+        return False
+    return bytes_today > threshold_bytes and bytes_today > multiplier * avg_daily_bytes
+
+
+def _fmt_bytes(b: int) -> str:
+    gb = b / 1024**3
+    if gb >= 1:
+        return f"{gb:.1f} GB"
+    mb = b / 1024**2
+    return f"{mb:.1f} MB"
+
+
+async def _fetch_all_users(sdk: RemnawaveSDK) -> list[object]:
+    users: list[object] = []
+    start = 0
+    size = 100
+    while True:
+        page = await sdk.users.get_all_users(start=start, size=size)
+        users.extend(page.users)  # type: ignore[attr-defined]
+        if len(users) >= page.total:  # type: ignore[attr-defined]
+            break
+        start += size
+    return users
+
+
+async def _run_traffic_check(
+    config: Config,
+    session_factory: async_sessionmaker,  # type: ignore[type-arg]
+    sdk: RemnawaveSDK,
+    notify: NotifyFn,
+) -> None:
+    now = datetime.now(timezone.utc)
+    today = now.date()
+    threshold_bytes = int(config.traffic_anomaly_threshold_gb * 1024**3)
+
+    users = await _fetch_all_users(sdk)
+
+    async with session_factory() as session:
+        async with session.begin():
+            gateway = PostgresUserTrafficGateway(session=session)
+            view = PostgresUserTrafficView(session=session)
+
+            for user in users:
+                user_uuid = str(user.uuid)  # type: ignore[attr-defined]
+                username = str(user.username)  # type: ignore[attr-defined]
+                current_bytes = int(
+                    getattr(getattr(user, "user_traffic", None), "used_traffic_bytes", 0) or 0
+                )
+
+                snapshot = await view.get_last_snapshot(user_uuid)
+
+                await gateway.update_last_snapshot(
+                    UpdateLastSnapshot(
+                        user_uuid=user_uuid,
+                        username=username,
+                        used_bytes=current_bytes,
+                        recorded_at=now,
+                    )
+                )
+
+                if snapshot is None:
+                    continue  # First run — no delta yet
+
+                delta = _compute_delta(current=current_bytes, previous=snapshot.used_bytes)
+                if delta is None or delta == 0:
+                    continue  # Reset or no new traffic
+
+                await gateway.upsert_daily_traffic(
+                    UpsertDailyTraffic(
+                        user_uuid=user_uuid,
+                        username=username,
+                        date=today,
+                        delta_bytes=delta,
+                    )
+                )
+
+            # Anomaly check after all users processed
+            candidates = await view.get_today_unalerted()
+            for record in candidates:
+                avg_bytes = await view.get_avg_daily_7d(record.user_uuid)
+                if not _is_anomaly(
+                    bytes_today=record.bytes_consumed,
+                    avg_daily_bytes=avg_bytes,
+                    threshold_bytes=threshold_bytes,
+                    multiplier=config.traffic_anomaly_multiplier,
+                ):
+                    continue
+                await gateway.mark_anomaly_alerted(
+                    MarkAnomalyAlerted(user_uuid=record.user_uuid, date=today)
+                )
+                multiplier_actual = (
+                    record.bytes_consumed / avg_bytes if avg_bytes > 0 else 0
+                )
+                await notify(
+                    f"⚠️ Аномальный трафик: <b>{record.username}</b>\n"
+                    f"Сегодня: {_fmt_bytes(record.bytes_consumed)} | "
+                    f"Обычно: ~{_fmt_bytes(int(avg_bytes))}/день "
+                    f"(×{multiplier_actual:.1f})"
+                )
+
+
+async def traffic_monitoring_task(
+    config: Config,
+    session_factory: async_sessionmaker,  # type: ignore[type-arg]
+    sdk: RemnawaveSDK,
+    notify: NotifyFn,
+) -> None:
+    await asyncio.sleep(15)  # Let bot start before first heavy fetch
+    while True:
+        try:
+            await _run_traffic_check(config, session_factory, sdk, notify)
+        except Exception as e:
+            logger.error("Traffic monitoring error: %s", e)
+        await asyncio.sleep(config.traffic_check_interval_seconds)
