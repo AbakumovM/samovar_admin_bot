@@ -13,7 +13,7 @@ from src.apps.nodes.controllers.telegram.handlers import router as nodes_router
 from src.apps.nodes.ioc import NodeAdaptersProvider, NodeInteractorsProvider
 from src.apps.users.controllers.scheduler.tasks import traffic_monitoring_task
 from src.apps.users.controllers.telegram.handlers import router as users_router
-from src.apps.users.ioc import UserTrafficAdaptersProvider, UserTrafficInteractorsProvider
+from src.apps.users.ioc import UserTrafficAdaptersProvider
 from src.config import Config
 from src.infrastructure.db.engine import create_engine
 from src.infrastructure.db.session import create_session_factory
@@ -82,7 +82,6 @@ async def main() -> None:
         IncidentAdaptersProvider(),
         IncidentInteractorsProvider(),
         UserTrafficAdaptersProvider(),
-        UserTrafficInteractorsProvider(),
     )
     setup_dishka(container=container, router=dp)
 

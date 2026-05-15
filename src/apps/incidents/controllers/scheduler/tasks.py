@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from src.apps.incidents.adapters.view import PostgresIncidentView
 from src.apps.incidents.domain.models import IncidentInfo
+from src.apps.users.adapters.view import PostgresUserTrafficView
 from src.apps.users.domain.models import UserTrafficDailyInfo
 from src.config import Config
 
@@ -82,8 +83,6 @@ async def daily_report_task(
         await asyncio.sleep(sleep_seconds)
 
         try:
-            from src.apps.users.adapters.view import PostgresUserTrafficView
-
             async with session_factory() as session:
                 async with session.begin():
                     view = PostgresIncidentView(session=session)

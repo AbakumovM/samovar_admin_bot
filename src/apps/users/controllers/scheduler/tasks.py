@@ -1,4 +1,5 @@
 import asyncio
+import html
 import logging
 from collections.abc import Callable, Coroutine
 from datetime import datetime, timezone
@@ -51,7 +52,10 @@ async def _fetch_all_users(sdk: RemnawaveSDK) -> list[object]:
     size = 100
     while True:
         page = await sdk.users.get_all_users(start=start, size=size)
-        users.extend(page.users)  # type: ignore[attr-defined]  # SDK returns untyped response DTO
+        batch = page.users  # type: ignore[attr-defined]  # SDK returns untyped response DTO
+        if not batch:
+            break  # Safety guard: stop if API returns empty page
+        users.extend(batch)
         if len(users) >= page.total:  # type: ignore[attr-defined]  # SDK returns untyped response DTO
             break
         start += size
@@ -121,7 +125,14 @@ async def _run_traffic_check(
 
             candidates = await view.get_today_unalerted()
             anomaly_count = 0
+            alert_limit = 10  # Prevent Telegram flood if threshold misconfigured
             for record in candidates:
+                if anomaly_count >= alert_limit:
+                    logger.warning(
+                        "Traffic anomaly alert limit reached (%d), suppressing further alerts",
+                        alert_limit,
+                    )
+                    break
                 avg_bytes = await view.get_avg_daily_7d(record.user_uuid)
                 if not _is_anomaly(
                     bytes_today=record.bytes_consumed,
@@ -136,8 +147,9 @@ async def _run_traffic_check(
                 multiplier_actual = (
                     record.bytes_consumed / avg_bytes if avg_bytes > 0 else 0
                 )
+                safe_username = html.escape(record.username)
                 await notify(
-                    f"⚠️ Аномальный трафик: <b>{record.username}</b>\n"
+                    f"⚠️ Аномальный трафик: <b>{safe_username}</b>\n"
                     f"Сегодня: {_fmt_bytes(record.bytes_consumed)} | "
                     f"Обычно: ~{_fmt_bytes(int(avg_bytes))}/день "
                     f"(×{multiplier_actual:.1f})"

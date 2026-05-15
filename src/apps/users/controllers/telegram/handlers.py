@@ -1,3 +1,4 @@
+import html
 from datetime import date, timedelta
 
 from aiogram import Router
@@ -44,7 +45,7 @@ async def cmd_top_traffic(
     label = label_map.get(period_key, "24ч")
     lines = [f"📊 Топ потребителей трафика ({label})\n"]
     for i, rec in enumerate(records, 1):
-        lines.append(f"{i}. <b>{rec.username}</b> — {_fmt_bytes(rec.bytes_consumed)}")
+        lines.append(f"{i}. <b>{html.escape(rec.username)}</b> — {_fmt_bytes(rec.bytes_consumed)}")
     await message.answer("\n".join(lines))
 
 
@@ -62,7 +63,7 @@ async def cmd_anomalies(
     lines = ["⚠️ Аномалии трафика (сегодня)\n"]
     for rec in alerted:
         lines.append(
-            f"<b>{rec.username}</b> — {_fmt_bytes(rec.bytes_consumed)} 🚨"
+            f"<b>{html.escape(rec.username)}</b> — {_fmt_bytes(rec.bytes_consumed)} 🚨"
         )
     await message.answer("\n".join(lines))
 
@@ -81,7 +82,7 @@ async def cmd_user_traffic(
     records = await user_traffic_view.get_user_traffic_by_days(username=username, days=7)
 
     if not records:
-        await message.answer(f"Нет данных о трафике для пользователя <b>{username}</b>.")
+        await message.answer(f"Нет данных о трафике для пользователя <b>{html.escape(username)}</b>.")
         return
 
     # Build a dict for all 7 days including zeros
@@ -90,7 +91,7 @@ async def cmd_user_traffic(
     max_bytes = max(by_date.values(), default=1)
 
     day_names = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"]
-    lines = [f"👤 <b>{username}</b> — трафик за 7 дней\n"]
+    lines = [f"👤 <b>{html.escape(username)}</b> — трафик за 7 дней\n"]
     for offset in range(6, -1, -1):
         d = today - timedelta(days=offset)
         b = by_date.get(d, 0)
