@@ -1,4 +1,5 @@
 import asyncio
+import html
 import logging
 from collections.abc import Callable, Coroutine
 from datetime import datetime, timedelta, timezone
@@ -57,7 +58,7 @@ def _build_daily_report(
         for i, rec in enumerate(top_traffic[:5], 1):
             gb = rec.bytes_consumed / 1024**3
             anomaly = " ⚠️" if rec.anomaly_alerted else ""
-            lines.append(f"  {i}. {rec.username} — {gb:.1f} GB{anomaly}")
+            lines.append(f"  {i}. {html.escape(rec.username)} — {gb:.1f} GB{anomaly}")
 
     return "\n".join(lines)
 
