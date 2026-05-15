@@ -51,8 +51,8 @@ async def _fetch_all_users(sdk: RemnawaveSDK) -> list[object]:
     size = 100
     while True:
         page = await sdk.users.get_all_users(start=start, size=size)
-        users.extend(page.users)  # type: ignore[attr-defined]
-        if len(users) >= page.total:  # type: ignore[attr-defined]
+        users.extend(page.users)  # type: ignore[attr-defined]  # SDK returns untyped response DTO
+        if len(users) >= page.total:  # type: ignore[attr-defined]  # SDK returns untyped response DTO
             break
         start += size
     return users
@@ -65,19 +65,21 @@ async def _run_traffic_check(
     notify: NotifyFn,
 ) -> None:
     now = datetime.now(timezone.utc)
-    today = now.date()
+    today = now.date()  # UTC date — requires server/container to run in UTC (Docker default)
     threshold_bytes = int(config.traffic_anomaly_threshold_gb * 1024**3)
 
     users = await _fetch_all_users(sdk)
+    logger.debug("Traffic check: fetched %d users", len(users))
 
+    # Transaction 1: process user snapshots and daily traffic
     async with session_factory() as session:
         async with session.begin():
             gateway = PostgresUserTrafficGateway(session=session)
             view = PostgresUserTrafficView(session=session)
 
             for user in users:
-                user_uuid = str(user.uuid)  # type: ignore[attr-defined]
-                username = str(user.username)  # type: ignore[attr-defined]
+                user_uuid = str(user.uuid)  # type: ignore[attr-defined]  # SDK returns untyped response DTO
+                username = str(user.username)  # type: ignore[attr-defined]  # SDK returns untyped response DTO
                 current_bytes = int(
                     getattr(getattr(user, "user_traffic", None), "used_traffic_bytes", 0) or 0
                 )
@@ -94,11 +96,13 @@ async def _run_traffic_check(
                 )
 
                 if snapshot is None:
-                    continue  # First run — no delta yet
+                    continue  # First run — establish baseline, compute delta next tick
 
                 delta = _compute_delta(current=current_bytes, previous=snapshot.used_bytes)
-                if delta is None or delta == 0:
-                    continue  # Reset or no new traffic
+                if delta is None:
+                    continue  # Counter was reset (e.g. traffic reset by admin)
+                if delta == 0:
+                    continue  # No new traffic since last check
 
                 await gateway.upsert_daily_traffic(
                     UpsertDailyTraffic(
@@ -109,8 +113,14 @@ async def _run_traffic_check(
                     )
                 )
 
-            # Anomaly check after all users processed
+    # Transaction 2: anomaly detection and alerts
+    async with session_factory() as session:
+        async with session.begin():
+            gateway = PostgresUserTrafficGateway(session=session)
+            view = PostgresUserTrafficView(session=session)
+
             candidates = await view.get_today_unalerted()
+            anomaly_count = 0
             for record in candidates:
                 avg_bytes = await view.get_avg_daily_7d(record.user_uuid)
                 if not _is_anomaly(
@@ -132,6 +142,10 @@ async def _run_traffic_check(
                     f"Обычно: ~{_fmt_bytes(int(avg_bytes))}/день "
                     f"(×{multiplier_actual:.1f})"
                 )
+                anomaly_count += 1
+
+            if anomaly_count:
+                logger.info("Traffic check: %d anomalies detected", anomaly_count)
 
 
 async def traffic_monitoring_task(
@@ -140,6 +154,10 @@ async def traffic_monitoring_task(
     sdk: RemnawaveSDK,
     notify: NotifyFn,
 ) -> None:
+    logger.info(
+        "Traffic monitoring starting, first check in 15s, interval=%ds",
+        config.traffic_check_interval_seconds,
+    )
     await asyncio.sleep(15)  # Let bot start before first heavy fetch
     while True:
         try:
