@@ -1,0 +1,9 @@
+from typing import Protocol
+
+from src.apps.users.domain.commands import MarkAnomalyAlerted, UpdateLastSnapshot, UpsertDailyTraffic
+
+
+class UserTrafficGateway(Protocol):
+    async def upsert_daily_traffic(self, cmd: UpsertDailyTraffic) -> None: ...
+    async def update_last_snapshot(self, cmd: UpdateLastSnapshot) -> None: ...
+    async def mark_anomaly_alerted(self, cmd: MarkAnomalyAlerted) -> None: ...
