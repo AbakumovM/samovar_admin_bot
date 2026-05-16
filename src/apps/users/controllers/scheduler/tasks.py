@@ -146,7 +146,7 @@ async def _run_traffic_check(
                     threshold_bytes=threshold_bytes,
                     multiplier=config.traffic_anomaly_multiplier,
                 )
-                if not is_high and not is_spike:
+                if not is_high:
                     continue
                 await gateway.mark_anomaly_alerted(
                     MarkAnomalyAlerted(user_uuid=record.user_uuid, date=today)
