@@ -5,15 +5,15 @@ from aiogram import Bot, Dispatcher
 from dishka import make_async_container
 from dishka.integrations.aiogram import setup_dishka
 
+from src.apps.billing.controllers.scheduler.tasks import billing_alert_task
+from src.apps.billing.controllers.telegram.handlers import router as billing_router
+from src.apps.billing.ioc import BillingAdaptersProvider
 from src.apps.incidents.controllers.scheduler.tasks import daily_report_task
 from src.apps.incidents.controllers.telegram.handlers import router as incidents_router
 from src.apps.incidents.ioc import IncidentAdaptersProvider, IncidentInteractorsProvider
 from src.apps.nodes.controllers.scheduler.tasks import fast_monitoring_task, monitoring_task
 from src.apps.nodes.controllers.telegram.handlers import router as nodes_router
 from src.apps.nodes.ioc import NodeAdaptersProvider, NodeInteractorsProvider
-from src.apps.billing.controllers.scheduler.tasks import billing_alert_task
-from src.apps.billing.controllers.telegram.handlers import router as billing_router
-from src.apps.billing.ioc import BillingAdaptersProvider
 from src.apps.users.controllers.scheduler.tasks import traffic_monitoring_task
 from src.apps.users.controllers.telegram.handlers import router as users_router
 from src.apps.users.ioc import UserTrafficAdaptersProvider
@@ -114,7 +114,7 @@ async def main() -> None:
         BotCommand(command="mute", description="Заглушить алерты: /mute <имя> 30m|1h|24h"),
         BotCommand(command="unmute", description="Снять мут: /unmute <имя>"),
         BotCommand(command="report", description="Отчёт за последние 24 часа"),
-        BotCommand(command="top_traffic", description="Топ потребителей: /top_traffic day|week|month"),
+        BotCommand(command="top_traffic", description="Топ потребителей: /top_traffic day|week|month"),  # noqa: E501
         BotCommand(command="anomalies", description="Аномалии трафика сегодня"),
         BotCommand(command="user_traffic", description="Трафик пользователя: /user_traffic <имя>"),
         BotCommand(command="billing", description="Предстоящие платежи нод"),
