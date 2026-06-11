@@ -19,7 +19,9 @@ def _node(days_until: int) -> BillingNodeInfo:
 
 
 def _stats() -> BillingStatsInfo:
-    return BillingStatsInfo(upcoming_nodes_count=1, current_month_payments=1500.0, total_spent=9000.0)
+    return BillingStatsInfo(
+        upcoming_nodes_count=1, current_month_payments=1500.0, total_spent=9000.0
+    )
 
 
 def test_format_overview_warning_icon_when_within_threshold() -> None:

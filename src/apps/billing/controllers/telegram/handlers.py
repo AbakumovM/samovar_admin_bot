@@ -25,6 +25,16 @@ class PaymentFSM(StatesGroup):
     confirming = State()
 
 
+@router.message(Command("cancel"))
+async def cmd_cancel(message: Message, state: FSMContext) -> None:
+    current = await state.get_state()
+    if current is None:
+        await message.answer("Нечего отменять.")
+        return
+    await state.clear()
+    await message.answer("❌ Действие отменено.")
+
+
 def _format_billing_overview(
     nodes: list[BillingNodeInfo],
     stats: BillingStatsInfo,
@@ -119,11 +129,13 @@ async def callback_start_payment(
     config: FromDishka[Config],
 ) -> None:
     await callback.answer()
+    if not isinstance(callback.message, Message):
+        return
     billing_node_uuid = (callback.data or "").split(":", 1)[1]
     nodes = await billing_view.get_billing_nodes()
     node = next((n for n in nodes if n.uuid == billing_node_uuid), None)
     if node is None:
-        await callback.message.answer("Нода не найдена.")  # type: ignore[union-attr]
+        await callback.message.answer("Нода не найдена.")
         return
     await state.update_data(
         billing_node_uuid=billing_node_uuid,
@@ -133,7 +145,7 @@ async def callback_start_payment(
         current_next_billing_at=node.next_billing_at.isoformat(),
     )
     await state.set_state(PaymentFSM.waiting_amount)
-    await callback.message.answer(  # type: ignore[union-attr]
+    await callback.message.answer(
         f"Оплата ноды <b>{node.node_name}</b> ({node.provider_name}).\n"
         f"Введите сумму в {config.billing_currency}:"
     )
@@ -158,7 +170,7 @@ async def process_payment_amount(
     data = await state.get_data()
     current_next = datetime.fromisoformat(data["current_next_billing_at"])
     new_next = current_next + timedelta(days=30)
-    await state.update_data(amount=amount)
+    await state.update_data(amount=amount, new_next_billing_at=new_next.isoformat())
     await state.set_state(PaymentFSM.confirming)
 
     keyboard = InlineKeyboardMarkup(
@@ -184,14 +196,15 @@ async def callback_confirm_payment(
     config: FromDishka[Config],
 ) -> None:
     await callback.answer()
+    if not isinstance(callback.message, Message):
+        return
     data = await state.get_data()
     await state.clear()
 
     billing_node_uuid = UUID(data["billing_node_uuid"])
     provider_uuid = UUID(data["provider_uuid"])
     amount = float(data["amount"])
-    current_next = datetime.fromisoformat(data["current_next_billing_at"])
-    new_next = current_next + timedelta(days=30)
+    new_next = datetime.fromisoformat(data["new_next_billing_at"])
     now = datetime.now(UTC)
 
     await sdk.infra_billing.create_infra_billing_history_record(
@@ -207,7 +220,7 @@ async def callback_confirm_payment(
             next_billing_at=new_next,
         )
     )
-    await callback.message.edit_text(  # type: ignore[union-attr]
+    await callback.message.edit_text(
         f"✅ Оплата записана. Следующий платёж: <b>{new_next.strftime('%d.%m.%Y')}</b>"
     )
 
@@ -215,5 +228,7 @@ async def callback_confirm_payment(
 @router.callback_query(StateFilter(PaymentFSM.confirming), lambda c: c.data == "billing_cancel")
 async def callback_cancel_payment(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
+    if not isinstance(callback.message, Message):
+        return
     await state.clear()
-    await callback.message.edit_text("❌ Отменено.")  # type: ignore[union-attr]
+    await callback.message.edit_text("❌ Отменено.")
