@@ -1,14 +1,13 @@
 from dataclasses import dataclass
 from datetime import datetime
-from uuid import UUID
 
 
 @dataclass(frozen=True)
 class BillingNodeInfo:
-    uuid: UUID
-    node_uuid: UUID
+    uuid: str
+    node_uuid: str
     node_name: str
-    provider_uuid: UUID
+    provider_uuid: str
     provider_name: str
     provider_login_url: str | None
     next_billing_at: datetime
@@ -17,7 +16,7 @@ class BillingNodeInfo:
 
 @dataclass(frozen=True)
 class PaymentRecordInfo:
-    uuid: UUID
+    uuid: str
     node_name: str
     provider_name: str
     amount: float
