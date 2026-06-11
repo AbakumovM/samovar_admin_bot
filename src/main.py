@@ -11,6 +11,9 @@ from src.apps.incidents.ioc import IncidentAdaptersProvider, IncidentInteractors
 from src.apps.nodes.controllers.scheduler.tasks import fast_monitoring_task, monitoring_task
 from src.apps.nodes.controllers.telegram.handlers import router as nodes_router
 from src.apps.nodes.ioc import NodeAdaptersProvider, NodeInteractorsProvider
+from src.apps.billing.controllers.scheduler.tasks import billing_alert_task
+from src.apps.billing.controllers.telegram.handlers import router as billing_router
+from src.apps.billing.ioc import BillingAdaptersProvider
 from src.apps.users.controllers.scheduler.tasks import traffic_monitoring_task
 from src.apps.users.controllers.telegram.handlers import router as users_router
 from src.apps.users.ioc import UserTrafficAdaptersProvider
@@ -61,6 +64,10 @@ async def main() -> None:
         async def get_sdk(self) -> RemnawaveSDK:
             return sdk
 
+        @dishka_provide
+        async def get_config(self) -> Config:
+            return config
+
     class SessionProvider(Provider):
         @dishka_provide(scope=Scope.APP)
         async def get_session_factory(self) -> async_sessionmaker[AsyncSession]:
@@ -82,12 +89,14 @@ async def main() -> None:
         IncidentAdaptersProvider(),
         IncidentInteractorsProvider(),
         UserTrafficAdaptersProvider(),
+        BillingAdaptersProvider(),
     )
     setup_dishka(container=container, router=dp)
 
     dp.include_router(nodes_router)
     dp.include_router(incidents_router)
     dp.include_router(users_router)
+    dp.include_router(billing_router)
 
     notify = await _make_notify_fn(bot, config.admin_ids)
 
@@ -108,6 +117,8 @@ async def main() -> None:
         BotCommand(command="top_traffic", description="Топ потребителей: /top_traffic day|week|month"),
         BotCommand(command="anomalies", description="Аномалии трафика сегодня"),
         BotCommand(command="user_traffic", description="Трафик пользователя: /user_traffic <имя>"),
+        BotCommand(command="billing", description="Предстоящие платежи нод"),
+        BotCommand(command="billing_history", description="История платежей"),
     ])
 
     logger.info("Starting bot and monitoring loop")
@@ -117,6 +128,7 @@ async def main() -> None:
         fast_monitoring_task(config, session_factory, sdk, notify),
         daily_report_task(config, session_factory, notify),
         traffic_monitoring_task(config, session_factory, sdk, notify),
+        billing_alert_task(config, sdk, bot),
     )
 
 
