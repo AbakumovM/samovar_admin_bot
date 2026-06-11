@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock
 from uuid import UUID
 
@@ -7,7 +7,7 @@ from src.apps.billing.adapters.view import RemnawaveBillingView
 _NODE_UUID = UUID("11111111-0000-0000-0000-000000000001")
 _BILLING_UUID = UUID("aaaaaaaa-0000-0000-0000-000000000001")
 _PROVIDER_UUID = UUID("22222222-0000-0000-0000-000000000001")
-_DT = datetime(2026, 7, 14, 12, 0, 0, tzinfo=timezone.utc)
+_DT = datetime(2026, 7, 14, 12, 0, 0, tzinfo=UTC)
 
 
 def _make_sdk_billing_node(

@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import UUID
 
 from remnawave import RemnawaveSDK
@@ -12,7 +12,7 @@ class RemnawaveBillingView:
 
     async def get_billing_nodes(self) -> list[BillingNodeInfo]:
         response = await self._sdk.infra_billing.get_billing_nodes()
-        today = datetime.now(timezone.utc).date()
+        today = datetime.now(UTC).date()
         nodes = [
             BillingNodeInfo(
                 uuid=str(node.uuid),
@@ -22,7 +22,7 @@ class RemnawaveBillingView:
                 provider_name=node.provider.name,
                 provider_login_url=node.provider.login_url,
                 next_billing_at=node.next_billing_at,
-                days_until=(node.next_billing_at.astimezone(timezone.utc).date() - today).days,
+                days_until=(node.next_billing_at.astimezone(UTC).date() - today).days,
             )
             for node in response.billing_nodes
         ]
@@ -41,7 +41,7 @@ class RemnawaveBillingView:
         nodes_resp = await self._sdk.infra_billing.get_billing_nodes()
         history_resp = await self._sdk.infra_billing.get_infra_billing_history_records()
         node_name_map: dict[UUID, str] = {
-            n.node.uuid: n.node.name for n in nodes_resp.billing_nodes
+            n.node_uuid: n.node.name for n in nodes_resp.billing_nodes
         }
         provider_name_map: dict[UUID, str] = {
             n.provider_uuid: n.provider.name for n in nodes_resp.billing_nodes
