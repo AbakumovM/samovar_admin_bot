@@ -75,11 +75,14 @@ def _format_billing_history(records: list[PaymentRecordInfo], currency: str) -> 
     return "\n".join(lines)
 
 
-def _make_billing_keyboard(nodes: list[BillingNodeInfo]) -> InlineKeyboardMarkup | None:
-    if not nodes:
+def _make_billing_keyboard(
+    nodes: list[BillingNodeInfo], alert_days: int
+) -> InlineKeyboardMarkup | None:
+    urgent = [n for n in nodes if n.days_until <= alert_days]
+    if not urgent:
         return None
     rows = []
-    for node in nodes:
+    for node in urgent:
         row = []
         if node.provider_login_url:
             row.append(InlineKeyboardButton(text="🔗 Кабинет", url=node.provider_login_url))
@@ -105,7 +108,7 @@ async def cmd_billing(
     text = _format_billing_overview(
         nodes, stats, config.billing_currency, config.billing_alert_days_before
     )
-    keyboard = _make_billing_keyboard(nodes)
+    keyboard = _make_billing_keyboard(nodes, config.billing_alert_days_before)
     await message.answer(text, reply_markup=keyboard)
 
 
