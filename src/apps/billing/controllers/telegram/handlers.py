@@ -40,6 +40,7 @@ def _format_billing_overview(
     stats: BillingStatsInfo,
     currency: str,
     alert_days: int,
+    hidden_count: int = 0,
 ) -> str:
     lines = [
         "💰 <b>Биллинг нод</b>\n",
@@ -48,10 +49,12 @@ def _format_billing_overview(
         f"  • Оплачено за месяц: {stats.current_month_payments:.2f} {currency}\n"
         f"  • Всего потрачено: {stats.total_spent:.2f} {currency}",
     ]
-    if not nodes:
+    if not nodes and hidden_count == 0:
         lines.append("\nНет зарегистрированных billing-нод.")
         return "\n".join(lines)
-    lines.append("\n📅 Ближайшие платежи:")
+    lines.append("\n📅 Платежи на ближайшую неделю:")
+    if not nodes:
+        lines.append("  Нет платежей в ближайшие 7 дней.")
     for node in nodes:
         icon = "⚠️" if node.days_until <= alert_days else "  "
         date_str = node.next_billing_at.strftime("%d.%m.%Y")
@@ -59,6 +62,8 @@ def _format_billing_overview(
         lines.append(
             f"{icon} <b>{node.node_name}</b> ({node.provider_name}) — {date_str} ({days_text})"
         )
+    if hidden_count > 0:
+        lines.append(f"\n<i>...и ещё {hidden_count} нод позже</i>")
     return "\n".join(lines)
 
 
@@ -96,6 +101,9 @@ def _make_billing_keyboard(
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
+_DISPLAY_DAYS = 7
+
+
 @router.message(Command("billing"))
 @inject
 async def cmd_billing(
@@ -103,12 +111,14 @@ async def cmd_billing(
     billing_view: FromDishka[BillingView],
     config: FromDishka[Config],
 ) -> None:
-    nodes = await billing_view.get_billing_nodes()
+    all_nodes = await billing_view.get_billing_nodes()
     stats = await billing_view.get_billing_stats()
+    visible = [n for n in all_nodes if n.days_until <= _DISPLAY_DAYS]
+    hidden_count = len(all_nodes) - len(visible)
     text = _format_billing_overview(
-        nodes, stats, config.billing_currency, config.billing_alert_days_before
+        visible, stats, config.billing_currency, config.billing_alert_days_before, hidden_count
     )
-    keyboard = _make_billing_keyboard(nodes, config.billing_alert_days_before)
+    keyboard = _make_billing_keyboard(visible, config.billing_alert_days_before)
     await message.answer(text, reply_markup=keyboard)
 
 
