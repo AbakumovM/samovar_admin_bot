@@ -1,3 +1,4 @@
+import logging
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
@@ -7,6 +8,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 from dishka.integrations.aiogram import FromDishka, inject
+from pydantic import ValidationError
 from remnawave import RemnawaveSDK
 from remnawave.models import (
     CreateInfraBillingHistoryRecordRequestDto,
@@ -16,6 +18,8 @@ from remnawave.models import (
 from src.apps.billing.application.interfaces.view import BillingView
 from src.apps.billing.domain.models import BillingNodeInfo, BillingStatsInfo, PaymentRecordInfo
 from src.config import Config
+
+logger = logging.getLogger(__name__)
 
 router = Router()
 
@@ -220,13 +224,16 @@ async def callback_confirm_payment(
     new_next = datetime.fromisoformat(data["new_next_billing_at"])
     now = datetime.now(UTC)
 
-    await sdk.infra_billing.create_infra_billing_history_record(
-        body=CreateInfraBillingHistoryRecordRequestDto(
-            provider_uuid=provider_uuid,
-            amount=amount,
-            billed_at=now,
+    try:
+        await sdk.infra_billing.create_infra_billing_history_record(
+            body=CreateInfraBillingHistoryRecordRequestDto(
+                provider_uuid=provider_uuid,
+                amount=amount,
+                billed_at=now,
+            )
         )
-    )
+    except ValidationError as e:
+        logger.warning("create_infra_billing_history_record response parse failed: %s", e)
     await sdk.infra_billing.update_infra_billing_node(
         body=UpdateInfraBillingNodeRequestDto(
             uuids=[billing_node_uuid],
