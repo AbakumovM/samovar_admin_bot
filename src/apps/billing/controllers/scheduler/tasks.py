@@ -2,6 +2,7 @@ import asyncio
 import logging
 from datetime import UTC, datetime, timedelta
 
+import httpx
 from aiogram import Bot
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from remnawave import RemnawaveSDK
@@ -39,7 +40,9 @@ def _make_alert_keyboard(node: BillingNodeInfo) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[row])
 
 
-async def billing_alert_task(config: Config, sdk: RemnawaveSDK, bot: Bot) -> None:
+async def billing_alert_task(
+    config: Config, sdk: RemnawaveSDK, raw_client: httpx.AsyncClient, bot: Bot
+) -> None:
     while True:
         now = datetime.now(UTC)
         next_check = now.replace(
@@ -56,7 +59,7 @@ async def billing_alert_task(config: Config, sdk: RemnawaveSDK, bot: Bot) -> Non
         await asyncio.sleep(sleep_seconds)
 
         try:
-            view = RemnawaveBillingView(sdk=sdk)
+            view = RemnawaveBillingView(sdk=sdk, raw_client=raw_client)
             nodes = await view.get_billing_nodes()
             for node in nodes:
                 if 0 <= node.days_until <= config.billing_alert_days_before:

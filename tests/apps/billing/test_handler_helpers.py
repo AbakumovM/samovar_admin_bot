@@ -52,10 +52,9 @@ def test_format_history_empty() -> None:
 
 def test_format_history_shows_amount_and_names() -> None:
     record = PaymentRecordInfo(
-        uuid=_UUID_STR, node_name="RU-MSK-01", provider_name="Hetzner",
+        uuid=_UUID_STR, provider_name="Hetzner",
         amount=1500.0, payment_date=_DT,
     )
     text = _format_billing_history([record], "₽")
     assert "1500.00 ₽" in text
-    assert "RU-MSK-01" in text
     assert "Hetzner" in text

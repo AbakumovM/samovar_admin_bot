@@ -17,7 +17,6 @@ class BillingNodeInfo:
 @dataclass(frozen=True)
 class PaymentRecordInfo:
     uuid: str
-    node_name: str
     provider_name: str
     amount: float
     payment_date: datetime

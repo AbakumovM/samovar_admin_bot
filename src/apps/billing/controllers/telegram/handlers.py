@@ -77,10 +77,7 @@ def _format_billing_history(records: list[PaymentRecordInfo], currency: str) -> 
     lines = ["📜 <b>История платежей (последние 10)</b>\n"]
     for record in records:
         date_str = record.payment_date.strftime("%d.%m.%Y")
-        lines.append(
-            f"• {date_str} | {record.amount:.2f} {currency} | "
-            f"{record.node_name} ({record.provider_name})"
-        )
+        lines.append(f"• {date_str} | {record.amount:.2f} {currency} | {record.provider_name}")
     return "\n".join(lines)
 
 

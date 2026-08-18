@@ -1,14 +1,15 @@
 from datetime import UTC, datetime
-from uuid import UUID
 
+import httpx
 from remnawave import RemnawaveSDK
 
 from src.apps.billing.domain.models import BillingNodeInfo, BillingStatsInfo, PaymentRecordInfo
 
 
 class RemnawaveBillingView:
-    def __init__(self, sdk: RemnawaveSDK) -> None:
+    def __init__(self, sdk: RemnawaveSDK, raw_client: httpx.AsyncClient) -> None:
         self._sdk = sdk
+        self._raw_client = raw_client
 
     async def get_billing_nodes(self) -> list[BillingNodeInfo]:
         response = await self._sdk.infra_billing.get_billing_nodes()
@@ -38,22 +39,21 @@ class RemnawaveBillingView:
         )
 
     async def get_payment_history(self, limit: int = 10) -> list[PaymentRecordInfo]:
-        nodes_resp = await self._sdk.infra_billing.get_billing_nodes()
-        history_resp = await self._sdk.infra_billing.get_infra_billing_history_records()
-        node_name_map: dict[UUID, str] = {
-            n.node_uuid: n.node.name for n in nodes_resp.billing_nodes
-        }
-        provider_name_map: dict[UUID, str] = {
-            n.provider_uuid: n.provider.name for n in nodes_resp.billing_nodes
-        }
-        records = sorted(history_resp.records, key=lambda r: r.payment_date, reverse=True)
+        # Raw HTTP: panel v3.2.3 dropped `nodeUuid` from history records —
+        # payments are now tracked per-provider, not per-node — and the SDK's
+        # response model still requires the old (now-missing) fields.
+        response = await self._raw_client.get(
+            "/infra-billing/history", params={"start": 0, "size": limit}
+        )
+        response.raise_for_status()
+        records = response.json()["response"]["records"]
+        records.sort(key=lambda r: r["billedAt"], reverse=True)
         return [
             PaymentRecordInfo(
-                uuid=str(record.uuid),
-                node_name=node_name_map.get(record.node_uuid, "Неизвестная нода"),
-                provider_name=provider_name_map.get(record.provider_uuid, "Неизвестный провайдер"),
-                amount=float(record.amount),
-                payment_date=record.payment_date,
+                uuid=str(record["uuid"]),
+                provider_name=str(record["provider"]["name"]),
+                amount=float(record["amount"]),
+                payment_date=datetime.fromisoformat(record["billedAt"].replace("Z", "+00:00")),
             )
             for record in records[:limit]
         ]

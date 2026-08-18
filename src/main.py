@@ -21,6 +21,7 @@ from src.config import Config
 from src.infrastructure.db.engine import create_engine
 from src.infrastructure.db.session import create_session_factory
 from src.infrastructure.remnawave.client import create_remnawave_client
+from src.infrastructure.remnawave.raw_client import create_remnawave_raw_client
 from src.infrastructure.telegram.setup import create_bot, create_dispatcher
 
 logging.basicConfig(level=logging.INFO)
@@ -43,11 +44,13 @@ async def main() -> None:
     engine = create_engine(config)
     session_factory = create_session_factory(engine)
     sdk = create_remnawave_client(config)
+    raw_client = create_remnawave_raw_client(config)
     bot = create_bot(config)
     dp: Dispatcher = create_dispatcher(config)
 
     from collections.abc import AsyncIterable
 
+    import httpx
     from dishka import Provider, Scope
     from dishka import provide as dishka_provide
     from remnawave import RemnawaveSDK
@@ -63,6 +66,10 @@ async def main() -> None:
         @dishka_provide
         async def get_sdk(self) -> RemnawaveSDK:
             return sdk
+
+        @dishka_provide
+        async def get_raw_client(self) -> httpx.AsyncClient:
+            return raw_client
 
         @dishka_provide
         async def get_config(self) -> Config:
@@ -127,8 +134,8 @@ async def main() -> None:
         monitoring_task(config, session_factory, sdk, notify),
         fast_monitoring_task(config, session_factory, sdk, notify),
         daily_report_task(config, session_factory, notify),
-        traffic_monitoring_task(config, session_factory, sdk, notify),
-        billing_alert_task(config, sdk, bot),
+        traffic_monitoring_task(config, session_factory, raw_client, notify),
+        billing_alert_task(config, sdk, raw_client, bot),
     )
 
 

@@ -22,7 +22,7 @@ def test_billing_node_info_is_frozen() -> None:
 
 def test_payment_record_info_is_frozen() -> None:
     record = PaymentRecordInfo(
-        uuid=_UUID_STR, node_name="RU-MSK-01", provider_name="Hetzner",
+        uuid=_UUID_STR, provider_name="Hetzner",
         amount=1500.0, payment_date=_DT,
     )
     with pytest.raises((FrozenInstanceError, AttributeError)):

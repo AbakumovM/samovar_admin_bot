@@ -2,15 +2,19 @@ import asyncio
 import html
 import logging
 from collections.abc import Callable, Coroutine
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
-from remnawave import RemnawaveSDK
+import httpx
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from src.apps.users.adapters.gateway import PostgresUserTrafficGateway
 from src.apps.users.adapters.view import PostgresUserTrafficView
-from src.apps.users.domain.commands import MarkAnomalyAlerted, UpdateLastSnapshot, UpsertDailyTraffic
+from src.apps.users.domain.commands import (
+    MarkAnomalyAlerted,
+    UpdateLastSnapshot,
+    UpsertDailyTraffic,
+)
 from src.config import Config
 
 logger = logging.getLogger(__name__)
@@ -51,39 +55,46 @@ def _fmt_bytes(b: int) -> str:
     return f"{mb:.1f} MB"
 
 
-async def _fetch_all_users(sdk: RemnawaveSDK) -> list[object]:
-    users: list[object] = []
-    start = 0
-    size = 100
+async def _fetch_all_users(raw_client: httpx.AsyncClient) -> list[dict[str, Any]]:
+    # Raw HTTP via /users/stream: the remnawave SDK's response models predate
+    # panel API v3.2.3 (users no longer have `uuid`, only numeric `id`), and
+    # /users/stream is the endpoint meant for full-collection traversal
+    # (unlike offset-based /users, which the panel docs warn against using
+    # for heavy pagination).
+    users: list[dict[str, Any]] = []
+    cursor: int | None = None
+    size = 1000
     while True:
-        page = await sdk.users.get_all_users(start=start, size=size)
-        batch = page.users  # type: ignore[attr-defined]  # SDK returns untyped response DTO
-        if not batch:
-            break  # Safety guard: stop if API returns empty page
+        params: dict[str, int] = {"size": size}
+        if cursor is not None:
+            params["cursor"] = cursor
+        response = await raw_client.get("/users/stream", params=params)
+        response.raise_for_status()
+        page = response.json()["response"]
+        batch = page["users"]
         active = [
             u
             for u in batch
-            if str(getattr(u, "status", "")).lower() == "active"
-            and getattr(u, "telegram_id", None) is not None
+            if str(u.get("status", "")).lower() == "active" and u.get("telegramId") is not None
         ]
         users.extend(active)
-        if start + size >= page.total:  # type: ignore[attr-defined]  # SDK returns untyped response DTO
+        if not page.get("hasMore"):
             break
-        start += size
+        cursor = page["nextCursor"]
     return users
 
 
 async def _run_traffic_check(
     config: Config,
     session_factory: async_sessionmaker,  # type: ignore[type-arg]
-    sdk: RemnawaveSDK,
+    raw_client: httpx.AsyncClient,
     notify: NotifyFn,
 ) -> None:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     today = now.date()  # UTC date — requires server/container to run in UTC (Docker default)
     threshold_bytes = int(config.traffic_anomaly_threshold_gb * 1024**3)
 
-    users = await _fetch_all_users(sdk)
+    users = await _fetch_all_users(raw_client)
     logger.info("Traffic check: %d active users to process", len(users))
 
     # Transaction 1: process user snapshots and daily traffic
@@ -93,11 +104,12 @@ async def _run_traffic_check(
             view = PostgresUserTrafficView(session=session)
 
             for user in users:
-                user_uuid = str(user.uuid)  # type: ignore[attr-defined]  # SDK returns untyped response DTO
-                username = str(user.username)  # type: ignore[attr-defined]  # SDK returns untyped response DTO
-                current_bytes = int(
-                    getattr(getattr(user, "user_traffic", None), "used_traffic_bytes", 0) or 0
-                )
+                # Panel v3.2.3 dropped per-user `uuid` — `id` (numeric) is the
+                # stable identifier now. Field kept as `user_uuid` to match
+                # the existing DB column/domain naming.
+                user_uuid = str(user["id"])
+                username = str(user["username"])
+                current_bytes = int((user.get("userTraffic") or {}).get("usedTrafficBytes", 0) or 0)
 
                 snapshot = await view.get_last_snapshot(user_uuid)
 
@@ -180,7 +192,7 @@ async def _run_traffic_check(
 async def traffic_monitoring_task(
     config: Config,
     session_factory: async_sessionmaker,  # type: ignore[type-arg]
-    sdk: RemnawaveSDK,
+    raw_client: httpx.AsyncClient,
     notify: NotifyFn,
 ) -> None:
     logger.info(
@@ -190,7 +202,7 @@ async def traffic_monitoring_task(
     await asyncio.sleep(15)  # Let bot start before first heavy fetch
     while True:
         try:
-            await _run_traffic_check(config, session_factory, sdk, notify)
+            await _run_traffic_check(config, session_factory, raw_client, notify)
         except Exception as e:
             logger.error("Traffic monitoring error: %s", e)
         await asyncio.sleep(config.traffic_check_interval_seconds)
