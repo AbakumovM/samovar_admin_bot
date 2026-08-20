@@ -1,3 +1,4 @@
+import httpx
 from dishka import Provider, Scope, provide
 from remnawave import RemnawaveSDK
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -13,8 +14,10 @@ class NodeAdaptersProvider(Provider):
     scope = Scope.REQUEST
 
     @provide
-    async def node_gateway(self, sdk: RemnawaveSDK, session: AsyncSession) -> NodeGateway:
-        return RemnaWaveNodeGateway(sdk=sdk, session=session)
+    async def node_gateway(
+        self, raw_client: httpx.AsyncClient, session: AsyncSession
+    ) -> NodeGateway:
+        return RemnaWaveNodeGateway(raw_client=raw_client, session=session)
 
     @provide
     async def node_view(self, sdk: RemnawaveSDK, session: AsyncSession) -> NodeView:

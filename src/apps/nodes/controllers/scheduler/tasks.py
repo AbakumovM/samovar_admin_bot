@@ -3,6 +3,7 @@ import logging
 from collections.abc import Callable, Coroutine
 from typing import Any
 
+import httpx
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from src.apps.incidents.adapters.gateway import PostgresIncidentGateway
@@ -18,10 +19,12 @@ logger = logging.getLogger(__name__)
 NotifyFn = Callable[[str], Coroutine[Any, Any, None]]
 
 
-def _make_loop(sdk: Any, session: Any, notify: NotifyFn, config: Config) -> MonitoringLoop:
+def _make_loop(
+    sdk: Any, raw_client: httpx.AsyncClient, session: Any, notify: NotifyFn, config: Config
+) -> MonitoringLoop:
     return MonitoringLoop(
         node_view=RemnaWaveNodeView(sdk=sdk, session=session),
-        node_gateway=RemnaWaveNodeGateway(sdk=sdk, session=session),
+        node_gateway=RemnaWaveNodeGateway(raw_client=raw_client, session=session),
         incident_interactor=IncidentInteractor(
             gateway=PostgresIncidentGateway(session=session),
             view=PostgresIncidentView(session=session),
@@ -37,6 +40,7 @@ async def monitoring_task(
     config: Config,
     session_factory: async_sessionmaker,  # type: ignore[type-arg]
     sdk: Any,
+    raw_client: httpx.AsyncClient,
     notify: NotifyFn,
 ) -> None:
     logger.info("Starting monitoring loop (interval=%ds)", config.poll_interval_seconds)
@@ -44,7 +48,7 @@ async def monitoring_task(
         try:
             async with session_factory() as session:
                 async with session.begin():
-                    await _make_loop(sdk, session, notify, config).poll()
+                    await _make_loop(sdk, raw_client, session, notify, config).poll()
         except Exception as e:
             logger.error("Monitoring poll error: %s", e)
         await asyncio.sleep(config.poll_interval_seconds)
@@ -54,6 +58,7 @@ async def fast_monitoring_task(
     config: Config,
     session_factory: async_sessionmaker,  # type: ignore[type-arg]
     sdk: Any,
+    raw_client: httpx.AsyncClient,
     notify: NotifyFn,
 ) -> None:
     logger.info("Starting fast monitoring loop (interval=%ds)", config.fast_poll_interval_seconds)
@@ -62,6 +67,6 @@ async def fast_monitoring_task(
         try:
             async with session_factory() as session:
                 async with session.begin():
-                    await _make_loop(sdk, session, notify, config).poll_offline()
+                    await _make_loop(sdk, raw_client, session, notify, config).poll_offline()
         except Exception as e:
             logger.error("Fast monitoring poll error: %s", e)
