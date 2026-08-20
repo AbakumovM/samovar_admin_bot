@@ -5,6 +5,10 @@ from alembic import context
 from sqlalchemy.ext.asyncio import create_async_engine
 
 # Import all ORM models so Alembic autogenerate picks them up
+from src.apps.antifraud.adapters.orm import (  # noqa: F401
+    AntifraudNotifiedUserModel,
+    AntifraudViolationCountModel,
+)
 from src.apps.incidents.adapters.orm import IncidentModel, NodeStatsSnapshotModel  # noqa: F401
 from src.apps.nodes.adapters.orm import MutedNodeModel  # noqa: F401
 from src.apps.users.adapters.orm import UserTrafficDailyModel, UserTrafficLastSnapshotModel  # noqa: F401

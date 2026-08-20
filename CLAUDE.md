@@ -13,6 +13,7 @@ Telegram-бот для мониторинга VPN-нод в Remnawave-панел
 - remnawave SDK 2.7.1 — API-клиент нод
 - SQLAlchemy 2.x async + asyncpg + Alembic — БД
 - PostgreSQL 16
+- maxminddb — чтение GeoLite2-ASN (опционально, для антифрод ASN-группировки)
 - Docker + docker-compose
 
 ## Архитектура
@@ -79,6 +80,7 @@ restart_attempts >= max_attempts → эскалация 🚨 + стоп (бол�
 | `/user_traffic <имя>` | Трафик пользователя за 7 дней |
 | `/billing` | Предстоящие платежи нод, статистика, кнопки оплаты |
 | `/billing_history` | Последние 10 записей платежей |
+| `/antifraud_check` | Разовая проверка на шеринг подписки (не дожидаясь расписания) |
 | `/restart <имя>` | Рестарт ноды |
 | `/restart_all` | Рестарт всех нод (с подтверждением) |
 | `/mute <имя> 30m\|1h\|24h` | Заглушить алерты |
@@ -90,6 +92,52 @@ restart_attempts >= max_attempts → эскалация 🚨 + стоп (бол�
 Настраивается через `DAILY_REPORT_HOUR_UTC=17` в `.env`.
 По запросу — `/report`.
 
+## Антифрод (шеринг подписки по конкурентным IP)
+
+`src/apps/antifraud/`. Раз в `ANTIFRAUD_SCAN_INTERVAL_SECONDS` (по умолчанию
+30 мин) последовательно опрашивает все ноды через `/api/connections/by-node/*`
+(нативный модуль панели 3.2.3, поверх Xray-core online-IP трекера, минус
+`ANTIFRAUD_IGNORED_NODE_UUIDS`), агрегирует IP по пользователям, отбрасывает
+IP из `ANTIFRAUD_IP_WHITELIST` и записи старше `ANTIFRAUD_IP_RECENCY_SECONDS`
+(по умолчанию 60 сек — Xray-core на практике копит записи дольше, чем
+«прямо сейчас»). Резолвинг лимита — точечный `GET /api/users/{id}` только
+для реально подключённых кандидатов (не полный проход по всем
+пользователям), с in-process кэшем на `ANTIFRAUD_USER_CACHE_TTL_SECONDS`.
+На панели с тысячами одновременных подключений последовательный резолвинг
+не укладывается в интервал скана — запросы идут с ограниченным
+параллелизмом (`ANTIFRAUD_USER_RESOLVE_CONCURRENCY`, по умолчанию 8, как у
+remnawave-limiter для той же задачи).
+
+`hwidDeviceLimit = null` или `= 0` — пользователь не проверяется (0
+намеренно трактуется как «без ограничений», не как «ноль устройств» —
+отличается от семантики нативной HWID-фичи панели, осознанное решение).
+Пользователи из `ANTIFRAUD_WHITELIST_USER_IDS` тоже пропускаются.
+
+Порог: `hwidDeviceLimit + ANTIFRAUD_IP_SLACK + floor(hwidDeviceLimit ×
+ANTIFRAUD_IP_SLACK_MULTIPLIER)` — «жёсткий» (действие), выше него — алерт с
+кнопкой отключения. Опционально, между голым лимитом и жёстким порогом —
+«мягкий» уровень (`ANTIFRAUD_SOFT_ALERTS_ENABLED`, по умолчанию выкл):
+только информационный алерт, без действия, свой отдельный cooldown.
+
+Группировка вместо сырых IP (снижает ложные срабатывания от роуминга
+одного устройства): `ANTIFRAUD_SUBNET_GROUPING` (по `/24`) или
+`ANTIFRAUD_ASN_GROUPING` (по провайдеру, через MaxMind GeoLite2-ASN —
+требует `ANTIFRAUD_MAXMIND_ACCOUNT_ID`/`ANTIFRAUD_MAXMIND_LICENSE_KEY`,
+бесплатный аккаунт на maxmind.com; база скачивается и обновляется
+автоматически раз в `ANTIFRAUD_MAXMIND_UPDATE_INTERVAL_HOURS`).
+
+Перед алертом — накопление нарушений: срабатывание не с первого раза, а
+после `ANTIFRAUD_VIOLATION_THRESHOLD` превышений подряд в окне
+`ANTIFRAUD_VIOLATION_WINDOW_SECONDS` (по умолчанию threshold=1 — как
+раньше, алерт сразу).
+
+Только уведомление админам батч-дайджестом с cooldown
+(`ANTIFRAUD_COOLDOWN_HOURS`, по умолчанию 24ч) — без авто-кика. В дайджесте
+каждый IP — кликабельная ссылка на ipinfo.io, кнопка ручного отключения
+(`POST /connections/drop`, требует отдельный write-скоуп токена). По
+умолчанию выключено (`ANTIFRAUD_ENABLED=false`). По запросу —
+`/antifraud_check`.
+
 ## БД (таблицы)
 
 - `incidents` — инциденты (node_uuid, started_at, resolved_at, restart_attempts, escalated, downtime_seconds)
@@ -97,6 +145,8 @@ restart_attempts >= max_attempts → эскалация 🚨 + стоп (бол�
 - `muted_nodes` — замьюченные ноды (node_uuid, muted_until)
 - `user_traffic_last_snapshot` — последний снапшот трафика каждого пользователя (для вычисления дельты)
 - `user_traffic_daily` — дневные агрегаты потребления по пользователям (user_uuid, date, bytes_consumed, anomaly_alerted)
+- `antifraud_notified_users` — cooldown уведомлений антифрода (remnawave_id, notified_at, soft_notified_at)
+- `antifraud_violation_counts` — накопление нарушений антифрода перед алертом (remnawave_id, count, window_expires_at)
 
 ## Конфиг (.env)
 
@@ -117,6 +167,29 @@ TRAFFIC_ANOMALY_MULTIPLIER=2.0
 BILLING_CURRENCY=$               # Символ валюты, по умолчанию: $
 BILLING_ALERT_DAYS_BEFORE=3      # За сколько дней алертить, по умолчанию: 3
 BILLING_CHECK_HOUR_UTC=17        # Час UTC ежедневной проверки, по умолчанию: 17
+ANTIFRAUD_ENABLED=false                    # Включить антифрод-скан, по умолчанию: false
+ANTIFRAUD_SCAN_INTERVAL_SECONDS=1800       # Интервал полного прохода по нодам, по умолчанию: 1800 (30 мин)
+ANTIFRAUD_IP_SLACK=2                       # Запас сверх hwidDeviceLimit пользователя при расчёте порога
+ANTIFRAUD_IP_SLACK_MULTIPLIER=0.0          # Доп. пропорциональный запас: + floor(лимит × множитель)
+ANTIFRAUD_IP_RECENCY_SECONDS=60            # Учитывать только IP с lastSeen не старше N сек (реальная одновременность)
+ANTIFRAUD_COOLDOWN_HOURS=24                # Не уведомлять повторно про одного юзера чаще, по умолчанию: 24
+ANTIFRAUD_JOB_POLL_INTERVAL_SECONDS=1.0    # Интервал поллинга job на ноде
+ANTIFRAUD_JOB_POLL_TIMEOUT_SECONDS=15.0    # Таймаут поллинга job на одной ноде
+ANTIFRAUD_USER_CACHE_TTL_SECONDS=300.0     # TTL кэша GET /users/{id} на время процесса
+ANTIFRAUD_USER_RESOLVE_CONCURRENCY=8       # Параллелизм точечных GET /users/{id} на скан
+ANTIFRAUD_IGNORED_NODE_UUIDS=[]            # JSON-массив UUID нод, пропускаемых при сборе
+ANTIFRAUD_IP_WHITELIST=[]                  # JSON-массив IP/CIDR, исключаемых из подсчёта
+ANTIFRAUD_WHITELIST_USER_IDS=[]            # JSON-массив numeric id пользователей, пропускаемых целиком
+ANTIFRAUD_SOFT_ALERTS_ENABLED=false        # Информационный алерт при превышении голого лимита (без действия)
+ANTIFRAUD_VIOLATION_THRESHOLD=1            # Срабатываний подряд нужно для алерта, 1 = сразу
+ANTIFRAUD_VIOLATION_WINDOW_SECONDS=3600    # Окно накопления нарушений
+ANTIFRAUD_SUBNET_GROUPING=false            # Считать уникальные /24-подсети вместо сырых IP
+ANTIFRAUD_SUBNET_PREFIX_V4=24              # Длина IPv4-префикса для группировки
+ANTIFRAUD_ASN_GROUPING=false               # Считать уникальные ASN-провайдеры (приоритетнее subnet)
+ANTIFRAUD_MAXMIND_ACCOUNT_ID=              # Аккаунт MaxMind, нужен для ASN-группировки
+ANTIFRAUD_MAXMIND_LICENSE_KEY=             # Лицензионный ключ MaxMind (бесплатный)
+ANTIFRAUD_ASN_DATABASE_PATH=./geoip/GeoLite2-ASN.mmdb  # Путь к базе GeoLite2-ASN
+ANTIFRAUD_MAXMIND_UPDATE_INTERVAL_HOURS=168  # Интервал автообновления базы (недельный по умолчанию)
 ```
 
 **Важно**: `ADMIN_IDS` должен быть в JSON-формате `[id1,id2]`.

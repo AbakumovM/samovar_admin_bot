@@ -12,6 +12,7 @@ dependencies = [
     "pydantic-settings>=2.7.0",
     "python-dotenv>=1.0.0",
     "greenlet>=3.5.0",
+    "maxminddb>=2.6.2",
 ]
 
 [dependency-groups]

@@ -16,6 +16,7 @@ from src.apps.users.domain.commands import (
     UpsertDailyTraffic,
 )
 from src.config import Config
+from src.infrastructure.remnawave.pagination import fetch_all_users_stream
 
 logger = logging.getLogger(__name__)
 
@@ -56,32 +57,12 @@ def _fmt_bytes(b: int) -> str:
 
 
 async def _fetch_all_users(raw_client: httpx.AsyncClient) -> list[dict[str, Any]]:
-    # Raw HTTP via /users/stream: the remnawave SDK's response models predate
-    # panel API v3.2.3 (users no longer have `uuid`, only numeric `id`), and
-    # /users/stream is the endpoint meant for full-collection traversal
-    # (unlike offset-based /users, which the panel docs warn against using
-    # for heavy pagination).
-    users: list[dict[str, Any]] = []
-    cursor: int | None = None
-    size = 1000
-    while True:
-        params: dict[str, int] = {"size": size}
-        if cursor is not None:
-            params["cursor"] = cursor
-        response = await raw_client.get("/users/stream", params=params)
-        response.raise_for_status()
-        page = response.json()["response"]
-        batch = page["users"]
-        active = [
-            u
-            for u in batch
-            if str(u.get("status", "")).lower() == "active" and u.get("telegramId") is not None
-        ]
-        users.extend(active)
-        if not page.get("hasMore"):
-            break
-        cursor = page["nextCursor"]
-    return users
+    all_users = await fetch_all_users_stream(raw_client)
+    return [
+        u
+        for u in all_users
+        if str(u.get("status", "")).lower() == "active" and u.get("telegramId") is not None
+    ]
 
 
 async def _run_traffic_check(
