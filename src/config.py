@@ -1,10 +1,17 @@
+import json
+
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 def _parse_str_list(v: object) -> list[str]:
     if isinstance(v, str):
-        return [x.strip() for x in v.split(",") if x.strip()]
+        # Try JSON first
+        try:
+            return json.loads(v)
+        except (json.JSONDecodeError, ValueError):
+            # Fall back to comma-separated
+            return [x.strip() for x in v.split(",") if x.strip()]
     if v is None:
         return []
     return list(v)  # type: ignore[arg-type]
@@ -71,8 +78,18 @@ class Config(BaseSettings):
     antifraud_maxmind_license_key: str = ""
     antifraud_asn_database_path: str = "./geoip/GeoLite2-ASN.mmdb"
     antifraud_maxmind_update_interval_hours: int = 168
+    antifraud_auto_block_enabled: bool = False
+    antifraud_ru_node_prefixes: list[str] = ["RU"]
+    antifraud_ru_node_ip_threshold: int = 2
+    samovarbot_base_url: str = ""
+    samovarbot_internal_api_key: str = ""
 
-    @field_validator("antifraud_ignored_node_uuids", "antifraud_ip_whitelist", mode="before")
+    @field_validator(
+        "antifraud_ignored_node_uuids",
+        "antifraud_ip_whitelist",
+        "antifraud_ru_node_prefixes",
+        mode="before",
+    )
     @classmethod
     def parse_antifraud_str_lists(cls, v: object) -> list[str]:
         return _parse_str_list(v)
