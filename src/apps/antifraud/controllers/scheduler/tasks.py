@@ -26,7 +26,11 @@ from src.apps.antifraud.domain.models import (
 from src.config import Config
 from src.infrastructure.geoip.asn import AsnResolver
 from src.infrastructure.remnawave.user_cache import UserLookupCache
-from src.infrastructure.samovarbot.client import SamovarbotClient, check_no_active_payment
+from src.infrastructure.samovarbot.client import (
+    SamovarbotClient,
+    block_user,
+    check_no_active_payment,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -636,6 +640,7 @@ async def _run_antifraud_scan(
     bot: Bot,
     user_cache: UserLookupCache,
     asn_resolver: AsnResolver,
+    samovarbot_client: SamovarbotClient,
 ) -> int:
     """Run one full scan pass. Returns how many users were actually notified
     on the hard (action-eligible) track this run — used by both the
@@ -702,6 +707,7 @@ async def _run_antifraud_scan(
             )
 
             if hard:
+                hard = await _enrich_hard_with_new_criteria(hard, config, samovarbot_client)
                 accumulated_ids = await interactor.filter_by_violation_threshold(
                     remnawave_ids=[f.remnawave_id for f in hard],
                     now=now,
@@ -717,23 +723,62 @@ async def _run_antifraud_scan(
                     )
                     to_notify = [f for f in past_threshold if f.remnawave_id in eligible_ids]
                     if to_notify:
-                        digest = _format_digest(to_notify, hard=True)
-                        keyboard = _make_digest_keyboard(to_notify)
-                        for admin_id in config.admin_ids:
-                            try:
-                                await bot.send_message(admin_id, digest, reply_markup=keyboard)
-                            except Exception as e:
+                        auto_block_ids = {
+                            f.remnawave_id
+                            for f in to_notify
+                            if f.criteria_matched == 3
+                            and config.antifraud_auto_block_enabled
+                            and f.telegram_id is not None
+                        }
+                        auto_blocked: list[FlaggedUser] = []
+                        manual: list[FlaggedUser] = []
+                        for f in to_notify:
+                            if f.remnawave_id not in auto_block_ids:
+                                manual.append(f)
+                                continue
+                            assert f.telegram_id is not None
+                            reason = f"antifraud: auto-block, {f.criteria_matched}/3 критериев"
+                            blocked = await block_user(samovarbot_client, f.telegram_id, reason)
+                            if blocked:
+                                await _drop_connections(raw_client, f.remnawave_id)
+                                auto_blocked.append(f)
+                            else:
                                 logger.error(
-                                    "Antifraud: failed to notify admin %s: %s", admin_id, e
+                                    "Antifraud: auto-block failed for tg:%d, "
+                                    "falling back to manual alert",
+                                    f.telegram_id,
                                 )
+                                manual.append(f)
+
+                        if auto_blocked:
+                            auto_digest = _format_auto_block_digest(auto_blocked)
+                            for admin_id in config.admin_ids:
+                                try:
+                                    await bot.send_message(admin_id, auto_digest)
+                                except Exception as e:
+                                    logger.error(
+                                        "Antifraud: failed to notify admin %s: %s", admin_id, e
+                                    )
+                        if manual:
+                            digest = _format_digest(manual, hard=True)
+                            keyboard = _make_digest_keyboard(manual)
+                            for admin_id in config.admin_ids:
+                                try:
+                                    await bot.send_message(admin_id, digest, reply_markup=keyboard)
+                                except Exception as e:
+                                    logger.error(
+                                        "Antifraud: failed to notify admin %s: %s", admin_id, e
+                                    )
                         await interactor.mark_notified_batch(
                             remnawave_ids=[f.remnawave_id for f in to_notify], now=now
                         )
                         notified_count = len(to_notify)
                         logger.info(
-                            "Antifraud scan: notified about %d/%d hard-flagged users",
+                            "Antifraud scan: notified about %d/%d hard-flagged users "
+                            "(%d auto-blocked)",
                             len(to_notify),
                             len(hard),
+                            len(auto_blocked),
                         )
 
             if soft:
@@ -772,6 +817,7 @@ async def antifraud_scan_task(
     bot: Bot,
     user_cache: UserLookupCache,
     asn_resolver: AsnResolver,
+    samovarbot_client: SamovarbotClient,
 ) -> None:
     if not config.antifraud_enabled:
         logger.info("Antifraud scan disabled (antifraud_enabled=false), task exiting")
@@ -784,7 +830,14 @@ async def antifraud_scan_task(
     while True:
         try:
             await _run_antifraud_scan(
-                config, session_factory, sdk, raw_client, bot, user_cache, asn_resolver
+                config,
+                session_factory,
+                sdk,
+                raw_client,
+                bot,
+                user_cache,
+                asn_resolver,
+                samovarbot_client,
             )
         except Exception as e:
             logger.error("Antifraud scan error: %s", e)
