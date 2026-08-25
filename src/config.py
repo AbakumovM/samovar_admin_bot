@@ -6,12 +6,16 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 def _parse_str_list(v: object) -> list[str]:
     if isinstance(v, str):
-        # Try JSON first
-        try:
-            return json.loads(v)
-        except (json.JSONDecodeError, ValueError):
-            # Fall back to comma-separated
-            return [x.strip() for x in v.split(",") if x.strip()]
+        # Try JSON only if it looks like a JSON list
+        if v.strip().startswith("["):
+            try:
+                parsed = json.loads(v)
+            except json.JSONDecodeError:
+                parsed = None
+            if isinstance(parsed, list):
+                return parsed
+        # Fall back to comma-separated
+        return [x.strip() for x in v.split(",") if x.strip()]
     if v is None:
         return []
     return list(v)  # type: ignore[arg-type]
