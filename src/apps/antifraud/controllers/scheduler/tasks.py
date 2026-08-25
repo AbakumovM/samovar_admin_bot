@@ -1,4 +1,5 @@
 import asyncio
+import dataclasses
 import html
 import ipaddress
 import logging
@@ -25,6 +26,7 @@ from src.apps.antifraud.domain.models import (
 from src.config import Config
 from src.infrastructure.geoip.asn import AsnResolver
 from src.infrastructure.remnawave.user_cache import UserLookupCache
+from src.infrastructure.samovarbot.client import SamovarbotClient, check_no_active_payment
 
 logger = logging.getLogger(__name__)
 
@@ -515,6 +517,66 @@ async def _resolve_users_bounded(
 
     resolved = await asyncio.gather(*(_bounded(uid) for uid in user_ids))
     return {uid: record for uid, record in resolved if record is not None}
+
+
+async def _resolve_payment_bounded(
+    client: SamovarbotClient, telegram_ids: list[int], concurrency: int
+) -> dict[int, bool | None]:
+    semaphore = asyncio.Semaphore(concurrency)
+
+    async def _bounded(tg_id: int) -> tuple[int, bool | None]:
+        async with semaphore:
+            return tg_id, await check_no_active_payment(client, tg_id)
+
+    resolved = await asyncio.gather(*(_bounded(tg_id) for tg_id in telegram_ids))
+    return dict(resolved)
+
+
+async def _enrich_hard_with_new_criteria(
+    hard: list[FlaggedUser],
+    config: Config,
+    samovarbot_client: SamovarbotClient,
+) -> list[FlaggedUser]:
+    """Добавляет критерии RU-нод и статуса оплаты уже-hard кандидатам.
+
+    criteria_matched стартует с 1 (is_hard — это критерий 2, всегда true
+    для любого из списка hard) и получает +1 за каждый дополнительный
+    сработавший критерий. Критерий, который не удалось оценить (нет
+    telegram_id, samovarbot недоступен), даёт 0, никогда не завышая счёт
+    на недостающих данных.
+    """
+    ru_prefixes = {p.upper() for p in config.antifraud_ru_node_prefixes}
+    interim: list[FlaggedUser] = []
+    for f in hard:
+        ru_count = _ru_node_group_count(
+            f.ips, f.grouping_mode, config.antifraud_subnet_prefix_v4, ru_prefixes
+        )
+        ru_tripped = ru_count > config.antifraud_ru_node_ip_threshold
+        interim.append(
+            dataclasses.replace(
+                f,
+                ru_node_ip_count=ru_count,
+                ru_node_threshold=config.antifraud_ru_node_ip_threshold,
+                criteria_matched=1 + (1 if ru_tripped else 0),
+            )
+        )
+
+    payment_targets = [f.telegram_id for f in interim if f.telegram_id is not None]
+    payment_by_tg = await _resolve_payment_bounded(
+        samovarbot_client, payment_targets, config.antifraud_user_resolve_concurrency
+    )
+
+    enriched: list[FlaggedUser] = []
+    for f in interim:
+        no_payment = payment_by_tg.get(f.telegram_id) if f.telegram_id is not None else None
+        enriched.append(
+            dataclasses.replace(
+                f,
+                no_active_payment=no_payment,
+                criteria_matched=f.criteria_matched + (1 if no_payment else 0),
+            )
+        )
+    return enriched
 
 
 async def _drop_connections(raw_client: httpx.AsyncClient, remnawave_id: int) -> bool:

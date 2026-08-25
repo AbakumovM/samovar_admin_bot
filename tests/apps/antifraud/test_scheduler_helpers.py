@@ -6,6 +6,7 @@ from src.apps.antifraud.controllers.scheduler.tasks import (
     _aggregate_ips_by_user,
     _compute_group_count,
     _drop_connections,
+    _enrich_hard_with_new_criteria,
     _filter_recent_ips,
     _filter_whitelisted_ips,
     _format_digest,
@@ -14,6 +15,7 @@ from src.apps.antifraud.controllers.scheduler.tasks import (
     _node_prefix,
     _resolve_and_filter_candidates,
     _resolve_asn,
+    _resolve_payment_bounded,
     _ru_node_group_count,
     _subnet_prefix,
 )
@@ -610,3 +612,79 @@ async def test_drop_connections_false_on_http_error() -> None:
     result = await _drop_connections(raw_client, 42)
 
     assert result is False
+
+
+# ---- payment status resolution + hard candidate enrichment ----
+
+
+async def test_resolve_payment_bounded_maps_by_telegram_id() -> None:
+    client = MagicMock()
+
+    async def fake_check(client_arg, telegram_id):
+        return telegram_id == 111
+
+    import src.apps.antifraud.controllers.scheduler.tasks as tasks_mod
+
+    original = tasks_mod.check_no_active_payment
+    tasks_mod.check_no_active_payment = fake_check
+    try:
+        result = await _resolve_payment_bounded(client, [111, 222], concurrency=8)
+    finally:
+        tasks_mod.check_no_active_payment = original
+
+    assert result == {111: True, 222: False}
+
+
+async def test_enrich_hard_computes_ru_and_payment_and_criteria_matched() -> None:
+    config = make_config(antifraud_ru_node_prefixes=["RU"], antifraud_ru_node_ip_threshold=1)
+    flagged = make_flagged(
+        remnawave_id=1,
+        telegram_id=111,
+        ips=(
+            AggregatedIp(ip="1.1.1.1", node_names=("RU-1",), last_seen=_T1),
+            AggregatedIp(ip="2.2.2.2", node_names=("RU-2",), last_seen=_T1),
+        ),
+    )
+
+    import src.apps.antifraud.controllers.scheduler.tasks as tasks_mod
+
+    original = tasks_mod.check_no_active_payment
+    tasks_mod.check_no_active_payment = AsyncMock(return_value=True)
+    try:
+        result = await _enrich_hard_with_new_criteria([flagged], config, MagicMock())
+    finally:
+        tasks_mod.check_no_active_payment = original
+
+    assert len(result) == 1
+    enriched = result[0]
+    assert enriched.ru_node_ip_count == 2
+    assert enriched.ru_node_threshold == 1
+    assert enriched.no_active_payment is True
+    assert enriched.criteria_matched == 3  # is_hard + ru + payment
+
+
+async def test_enrich_hard_skips_payment_check_without_telegram_id() -> None:
+    config = make_config(antifraud_ru_node_prefixes=["RU"], antifraud_ru_node_ip_threshold=99)
+    flagged = make_flagged(remnawave_id=1, telegram_id=None)
+
+    result = await _enrich_hard_with_new_criteria([flagged], config, MagicMock())
+
+    assert result[0].no_active_payment is None
+    assert result[0].criteria_matched == 1  # только is_hard, ru ниже порога, оплата не проверялась
+
+
+async def test_enrich_hard_criteria_matched_excludes_unknown_payment() -> None:
+    config = make_config(antifraud_ru_node_prefixes=["RU"], antifraud_ru_node_ip_threshold=99)
+    flagged = make_flagged(remnawave_id=1, telegram_id=111)
+
+    import src.apps.antifraud.controllers.scheduler.tasks as tasks_mod
+
+    original = tasks_mod.check_no_active_payment
+    tasks_mod.check_no_active_payment = AsyncMock(return_value=None)
+    try:
+        result = await _enrich_hard_with_new_criteria([flagged], config, MagicMock())
+    finally:
+        tasks_mod.check_no_active_payment = original
+
+    assert result[0].no_active_payment is None
+    assert result[0].criteria_matched == 1  # неизвестный статус оплаты не засчитывается
