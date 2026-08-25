@@ -416,6 +416,19 @@ def _format_grouping_line(f: FlaggedUser) -> str:
     return base + f", порог: {f.threshold}"
 
 
+def _format_criteria_line(f: FlaggedUser) -> str:
+    if f.no_active_payment is True:
+        payment_str = "нет активной оплаты ⚠️"
+    elif f.no_active_payment is False:
+        payment_str = "оплата активна"
+    else:
+        payment_str = "оплата: не проверялась"
+    ru_str = f"RU-ноды: {f.ru_node_ip_count} (порог {f.ru_node_threshold})"
+    if f.ru_node_ip_count > f.ru_node_threshold:
+        ru_str += " ⚠️"
+    return f"  {ru_str} | {payment_str} | критериев: {f.criteria_matched}/3"
+
+
 def _format_ip_line(ip: AggregatedIp) -> str:
     href = f"https://ipinfo.io/{ip.ip}"
     ip_link = f'<a href="{html.escape(href)}">{html.escape(ip.ip)}</a>'
@@ -450,9 +463,10 @@ def _format_digest(flagged: list[FlaggedUser], *, hard: bool) -> str:
         if len(f.ips) > _MAX_IPS_SHOWN_PER_USER:
             ip_lines += f"\n   +{len(f.ips) - _MAX_IPS_SHOWN_PER_USER} ещё"
         tg_str = f"tg:{f.telegram_id}" if f.telegram_id is not None else "нет telegram_id"
+        criteria_part = f"\n{_format_criteria_line(f)}" if hard else ""
         entry = (
             f"• <b>{html.escape(f.username)}</b> ({tg_str})\n"
-            f"  {_format_grouping_line(f)}\n"
+            f"  {_format_grouping_line(f)}{criteria_part}\n"
             f"{ip_lines}\n"
         )
         if used + len(entry) > budget:
@@ -467,16 +481,35 @@ def _format_digest(flagged: list[FlaggedUser], *, hard: bool) -> str:
     return "".join(lines)
 
 
+def _format_auto_block_digest(blocked: list[FlaggedUser]) -> str:
+    header = f"🚫 Antifraud: автоматически заблокировано пользователей: <b>{len(blocked)}</b>\n\n"
+    lines = [header]
+    for f in blocked:
+        tg_str = f"tg:{f.telegram_id}"
+        lines.append(
+            f"• <b>{html.escape(f.username)}</b> ({tg_str})\n"
+            f"  {_format_grouping_line(f)}\n{_format_criteria_line(f)}\n"
+        )
+    return "".join(lines)
+
+
 def _make_digest_keyboard(flagged: list[FlaggedUser]) -> InlineKeyboardMarkup:
-    rows = [
-        [
+    rows = []
+    for f in flagged[:_MAX_USERS_SHOWN]:
+        row = [
             InlineKeyboardButton(
                 text=f"🔌 Отключить {f.username}",
                 callback_data=f"antifraud_drop:{f.remnawave_id}",
             )
         ]
-        for f in flagged[:_MAX_USERS_SHOWN]
-    ]
+        if f.telegram_id is not None and f.criteria_matched >= 2:
+            row.append(
+                InlineKeyboardButton(
+                    text="🚫 Заблокировать",
+                    callback_data=f"antifraud_block:{f.remnawave_id}:{f.telegram_id}",
+                )
+            )
+        rows.append(row)
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 

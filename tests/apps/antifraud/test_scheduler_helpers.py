@@ -9,9 +9,12 @@ from src.apps.antifraud.controllers.scheduler.tasks import (
     _enrich_hard_with_new_criteria,
     _filter_recent_ips,
     _filter_whitelisted_ips,
+    _format_auto_block_digest,
+    _format_criteria_line,
     _format_digest,
     _grouping_mode,
     _IpWhitelist,
+    _make_digest_keyboard,
     _node_prefix,
     _resolve_and_filter_candidates,
     _resolve_asn,
@@ -75,6 +78,10 @@ def make_flagged(
     telegram_id: int | None = 123,
     hwid_device_limit: int = 3,
     is_hard: bool = True,
+    ru_node_ip_count: int = 0,
+    ru_node_threshold: int = 0,
+    no_active_payment: bool | None = None,
+    criteria_matched: int = 0,
 ) -> FlaggedUser:
     return FlaggedUser(
         remnawave_id=remnawave_id,
@@ -87,6 +94,10 @@ def make_flagged(
         hwid_device_limit=hwid_device_limit,
         threshold=threshold,
         is_hard=is_hard,
+        ru_node_ip_count=ru_node_ip_count,
+        ru_node_threshold=ru_node_threshold,
+        no_active_payment=no_active_payment,
+        criteria_matched=criteria_matched,
     )
 
 
@@ -531,6 +542,84 @@ def test_format_digest_asn_grouping_shows_asn_count_in_header() -> None:
     flagged = [make_flagged(grouping_mode="asn", group_count=2, ip_count=8, threshold=5)]
     text = _format_digest(flagged, hard=True)
     assert "ASN: 2" in text
+
+
+# ---- criteria line formatting ----
+
+
+def test_format_criteria_line_shows_ru_and_payment_warning() -> None:
+    f = make_flagged(
+        ru_node_ip_count=5, ru_node_threshold=2, no_active_payment=True, criteria_matched=3
+    )
+
+    line = _format_criteria_line(f)
+
+    assert "RU-ноды: 5" in line
+    assert "порог 2" in line
+    assert "нет активной оплаты" in line
+    assert "критериев: 3/3" in line
+
+
+def test_format_criteria_line_shows_unknown_payment() -> None:
+    f = make_flagged(
+        ru_node_ip_count=0, ru_node_threshold=2, no_active_payment=None, criteria_matched=1
+    )
+
+    line = _format_criteria_line(f)
+
+    assert "не проверялась" in line
+
+
+# ---- digest keyboard ----
+
+
+def test_make_digest_keyboard_adds_block_button_when_criteria_matched_high() -> None:
+    f = make_flagged(telegram_id=555, criteria_matched=2)
+
+    keyboard = _make_digest_keyboard([f])
+
+    callback_datas = [btn.callback_data for row in keyboard.inline_keyboard for btn in row]
+    assert "antifraud_drop:1" in callback_datas
+    assert "antifraud_block:1:555" in callback_datas
+
+
+def test_make_digest_keyboard_omits_block_button_when_criteria_matched_low() -> None:
+    f = make_flagged(telegram_id=555, criteria_matched=1)
+
+    keyboard = _make_digest_keyboard([f])
+
+    callback_datas = [btn.callback_data for row in keyboard.inline_keyboard for btn in row]
+    assert "antifraud_drop:1" in callback_datas
+    assert not any((cd or "").startswith("antifraud_block:") for cd in callback_datas)
+
+
+def test_make_digest_keyboard_omits_block_button_without_telegram_id() -> None:
+    f = make_flagged(telegram_id=None, criteria_matched=3)
+
+    keyboard = _make_digest_keyboard([f])
+
+    callback_datas = [btn.callback_data for row in keyboard.inline_keyboard for btn in row]
+    assert not any((cd or "").startswith("antifraud_block:") for cd in callback_datas)
+
+
+# ---- auto-block digest ----
+
+
+def test_format_auto_block_digest_lists_users() -> None:
+    f = make_flagged(
+        username="fraudster1",
+        telegram_id=555,
+        ru_node_ip_count=4,
+        ru_node_threshold=2,
+        no_active_payment=True,
+        criteria_matched=3,
+    )
+
+    digest = _format_auto_block_digest([f])
+
+    assert "fraudster1" in digest
+    assert "автоматически заблокировано" in digest
+    assert "3/3" in digest
 
 
 # ---- RU node prefix extraction ----
