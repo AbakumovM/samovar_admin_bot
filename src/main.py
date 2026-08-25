@@ -28,6 +28,7 @@ from src.infrastructure.geoip.updater import maxmind_update_task
 from src.infrastructure.remnawave.client import create_remnawave_client
 from src.infrastructure.remnawave.raw_client import create_remnawave_raw_client
 from src.infrastructure.remnawave.user_cache import UserLookupCache
+from src.infrastructure.samovarbot.client import SamovarbotClient, create_samovarbot_client
 from src.infrastructure.telegram.setup import create_bot, create_dispatcher
 
 logging.basicConfig(level=logging.INFO)
@@ -51,6 +52,7 @@ async def main() -> None:
     session_factory = create_session_factory(engine)
     sdk = create_remnawave_client(config)
     raw_client = create_remnawave_raw_client(config)
+    samovarbot_client = create_samovarbot_client(config)
     bot = create_bot(config)
     dp: Dispatcher = create_dispatcher(config)
 
@@ -83,6 +85,10 @@ async def main() -> None:
         @dishka_provide
         async def get_raw_client(self) -> httpx.AsyncClient:
             return raw_client
+
+        @dishka_provide
+        async def get_samovarbot_client(self) -> SamovarbotClient:
+            return samovarbot_client
 
         @dishka_provide
         async def get_config(self) -> Config:
@@ -133,25 +139,31 @@ async def main() -> None:
 
     from aiogram.types import BotCommand
 
-    await bot.set_my_commands([
-        BotCommand(command="status", description="Состояние всех нод"),
-        BotCommand(command="node", description="Детали по ноде: /node <имя>"),
-        BotCommand(command="incidents", description="Последние инциденты"),
-        BotCommand(command="stats", description="Статистика: /stats day|week|month"),
-        BotCommand(command="worst", description="Топ проблемных нод"),
-        BotCommand(command="providers", description="Инциденты по регионам"),
-        BotCommand(command="restart", description="Рестарт ноды: /restart <имя>"),
-        BotCommand(command="restart_all", description="Рестарт всех нод"),
-        BotCommand(command="mute", description="Заглушить алерты: /mute <имя> 30m|1h|24h"),
-        BotCommand(command="unmute", description="Снять мут: /unmute <имя>"),
-        BotCommand(command="report", description="Отчёт за последние 24 часа"),
-        BotCommand(command="top_traffic", description="Топ потребителей: /top_traffic day|week|month"),  # noqa: E501
-        BotCommand(command="anomalies", description="Аномалии трафика сегодня"),
-        BotCommand(command="user_traffic", description="Трафик пользователя: /user_traffic <имя>"),
-        BotCommand(command="billing", description="Предстоящие платежи нод"),
-        BotCommand(command="billing_history", description="История платежей"),
-        BotCommand(command="antifraud_check", description="Разовая проверка антифрода"),
-    ])
+    await bot.set_my_commands(
+        [
+            BotCommand(command="status", description="Состояние всех нод"),
+            BotCommand(command="node", description="Детали по ноде: /node <имя>"),
+            BotCommand(command="incidents", description="Последние инциденты"),
+            BotCommand(command="stats", description="Статистика: /stats day|week|month"),
+            BotCommand(command="worst", description="Топ проблемных нод"),
+            BotCommand(command="providers", description="Инциденты по регионам"),
+            BotCommand(command="restart", description="Рестарт ноды: /restart <имя>"),
+            BotCommand(command="restart_all", description="Рестарт всех нод"),
+            BotCommand(command="mute", description="Заглушить алерты: /mute <имя> 30m|1h|24h"),
+            BotCommand(command="unmute", description="Снять мут: /unmute <имя>"),
+            BotCommand(command="report", description="Отчёт за последние 24 часа"),
+            BotCommand(
+                command="top_traffic", description="Топ потребителей: /top_traffic day|week|month"
+            ),  # noqa: E501
+            BotCommand(command="anomalies", description="Аномалии трафика сегодня"),
+            BotCommand(
+                command="user_traffic", description="Трафик пользователя: /user_traffic <имя>"
+            ),
+            BotCommand(command="billing", description="Предстоящие платежи нод"),
+            BotCommand(command="billing_history", description="История платежей"),
+            BotCommand(command="antifraud_check", description="Разовая проверка антифрода"),
+        ]
+    )
 
     logger.info("Starting bot and monitoring loop")
     tasks = [
@@ -162,7 +174,14 @@ async def main() -> None:
         traffic_monitoring_task(config, session_factory, raw_client, notify),
         billing_alert_task(config, sdk, raw_client, bot),
         antifraud_scan_task(
-            config, session_factory, sdk, raw_client, bot, user_cache, asn_resolver
+            config,
+            session_factory,
+            sdk,
+            raw_client,
+            bot,
+            user_cache,
+            asn_resolver,
+            samovarbot_client,
         ),
     ]
     if isinstance(asn_resolver, MaxMindAsnResolver):

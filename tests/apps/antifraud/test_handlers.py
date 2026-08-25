@@ -67,7 +67,7 @@ async def test_cmd_antifraud_check_reports_no_violations() -> None:
         "src.apps.antifraud.controllers.telegram.handlers._run_antifraud_scan",
         AsyncMock(return_value=0),
     ) as scan:
-        await _cmd_antifraud_check(message, *[MagicMock() for _ in range(7)])
+        await _cmd_antifraud_check(message, *[MagicMock() for _ in range(8)])
 
     message.answer.assert_awaited_once()
     status = message.answer.return_value
@@ -82,7 +82,7 @@ async def test_cmd_antifraud_check_reports_notified_count() -> None:
         "src.apps.antifraud.controllers.telegram.handlers._run_antifraud_scan",
         AsyncMock(return_value=2),
     ):
-        await _cmd_antifraud_check(message, *[MagicMock() for _ in range(7)])
+        await _cmd_antifraud_check(message, *[MagicMock() for _ in range(8)])
 
     status = message.answer.return_value
     assert "2" in status.edit_text.await_args.args[0]
@@ -94,7 +94,7 @@ async def test_cmd_antifraud_check_reports_error() -> None:
         "src.apps.antifraud.controllers.telegram.handlers._run_antifraud_scan",
         AsyncMock(side_effect=RuntimeError("boom")),
     ):
-        await _cmd_antifraud_check(message, *[MagicMock() for _ in range(7)])
+        await _cmd_antifraud_check(message, *[MagicMock() for _ in range(8)])
 
     status = message.answer.return_value
     assert "ошибк" in status.edit_text.await_args.args[0].lower()

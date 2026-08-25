@@ -30,13 +30,21 @@ async def cmd_antifraud_check(
     raw_client: FromDishka[httpx.AsyncClient],
     user_cache: FromDishka[UserLookupCache],
     asn_resolver: FromDishka[AsnResolver],
+    samovarbot_client: FromDishka[SamovarbotClient],
 ) -> None:
     status = await message.answer(
         "⏳ Запускаю проверку антифрода (опрос всех нод, может занять пару минут)…"
     )
     try:
         notified = await _run_antifraud_scan(
-            config, session_factory, sdk, raw_client, bot, user_cache, asn_resolver
+            config,
+            session_factory,
+            sdk,
+            raw_client,
+            bot,
+            user_cache,
+            asn_resolver,
+            samovarbot_client,
         )
     except Exception as e:
         logger.error("Manual antifraud check failed: %s", e)
