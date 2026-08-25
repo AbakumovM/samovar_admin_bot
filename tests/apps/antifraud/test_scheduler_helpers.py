@@ -10,7 +10,7 @@ from src.apps.antifraud.controllers.scheduler.tasks import (
     _filter_recent_ips,
     _filter_whitelisted_ips,
     _format_auto_block_digest,
-    _format_criteria_line,
+    _format_criteria_breakdown,
     _format_digest,
     _grouping_mode,
     _IpWhitelist,
@@ -491,8 +491,8 @@ def test_format_digest_escapes_html() -> None:
 def test_format_digest_shows_device_limit_and_threshold() -> None:
     flagged = [make_flagged(hwid_device_limit=3, threshold=5, ip_count=8, group_count=8)]
     text = _format_digest(flagged, hard=True)
-    assert "лимит: 3" in text
-    assert "порог: 5" in text
+    assert "лимит 3" in text
+    assert "порог 5" in text
     assert "IP: 8" in text
 
 
@@ -547,27 +547,36 @@ def test_format_digest_asn_grouping_shows_asn_count_in_header() -> None:
 # ---- criteria line formatting ----
 
 
-def test_format_criteria_line_shows_ru_and_payment_warning() -> None:
+def test_format_criteria_breakdown_shows_ru_and_payment_warning() -> None:
     f = make_flagged(
         ru_node_ip_count=5, ru_node_threshold=2, no_active_payment=True, criteria_matched=3
     )
 
-    line = _format_criteria_line(f)
+    breakdown = _format_criteria_breakdown(f)
 
-    assert "RU-ноды: 5" in line
-    assert "порог 2" in line
-    assert "нет активной оплаты" in line
-    assert "критериев: 3/3" in line
+    assert "RU-ноды: 5" in breakdown
+    assert "порог 2" in breakdown
+    assert "нет активной подписки" in breakdown
+    assert "превышен" in breakdown
 
 
-def test_format_criteria_line_shows_unknown_payment() -> None:
+def test_format_criteria_breakdown_shows_unknown_payment() -> None:
     f = make_flagged(
         ru_node_ip_count=0, ru_node_threshold=2, no_active_payment=None, criteria_matched=1
     )
 
-    line = _format_criteria_line(f)
+    breakdown = _format_criteria_breakdown(f)
 
-    assert "не проверялась" in line
+    assert "не проверялась" in breakdown
+
+
+def test_format_criteria_breakdown_marks_ru_not_exceeded_at_threshold() -> None:
+    f = make_flagged(ru_node_ip_count=2, ru_node_threshold=2, no_active_payment=False)
+
+    breakdown = _format_criteria_breakdown(f)
+
+    assert "RU-ноды: 2 (порог 2) — не превышен" in breakdown
+    assert "➖ Оплата: активна" in breakdown
 
 
 # ---- digest keyboard ----

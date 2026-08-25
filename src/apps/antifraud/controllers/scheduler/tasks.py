@@ -420,17 +420,42 @@ def _format_grouping_line(f: FlaggedUser) -> str:
     return base + f", порог: {f.threshold}"
 
 
-def _format_criteria_line(f: FlaggedUser) -> str:
-    if f.no_active_payment is True:
-        payment_str = "нет активной оплаты ⚠️"
-    elif f.no_active_payment is False:
-        payment_str = "оплата активна"
+def _format_ip_criterion_line(f: FlaggedUser) -> str:
+    if f.grouping_mode == "asn":
+        stats = f"IP: {f.ip_count}, ASN: {f.group_count}"
+    elif f.grouping_mode == "subnet" and f.group_count < f.ip_count:
+        stats = f"IP: {f.ip_count}, подсетей: {f.group_count}"
     else:
-        payment_str = "оплата: не проверялась"
-    ru_str = f"RU-ноды: {f.ru_node_ip_count} (порог {f.ru_node_threshold})"
-    if f.ru_node_ip_count > f.ru_node_threshold:
-        ru_str += " ⚠️"
-    return f"  {ru_str} | {payment_str} | критериев: {f.criteria_matched}/3"
+        stats = f"IP: {f.ip_count}"
+    exceeded = f.group_count > f.threshold
+    icon = "⚠️" if exceeded else "➖"
+    status = "превышен" if exceeded else "не превышен"
+    return f"  {icon} {stats} (лимит {f.hwid_device_limit}, порог {f.threshold}) — {status}"
+
+
+def _format_ru_criterion_line(f: FlaggedUser) -> str:
+    exceeded = f.ru_node_ip_count > f.ru_node_threshold
+    icon = "⚠️" if exceeded else "➖"
+    status = "превышен" if exceeded else "не превышен"
+    return f"  {icon} RU-ноды: {f.ru_node_ip_count} (порог {f.ru_node_threshold}) — {status}"
+
+
+def _format_payment_criterion_line(f: FlaggedUser) -> str:
+    if f.no_active_payment is True:
+        return "  ⚠️ Оплата: нет активной подписки"
+    if f.no_active_payment is False:
+        return "  ➖ Оплата: активна"
+    return "  ➖ Оплата: не проверялась"
+
+
+def _format_criteria_breakdown(f: FlaggedUser) -> str:
+    return "\n".join(
+        [
+            _format_ip_criterion_line(f),
+            _format_ru_criterion_line(f),
+            _format_payment_criterion_line(f),
+        ]
+    )
 
 
 def _format_ip_line(ip: AggregatedIp) -> str:
@@ -467,12 +492,16 @@ def _format_digest(flagged: list[FlaggedUser], *, hard: bool) -> str:
         if len(f.ips) > _MAX_IPS_SHOWN_PER_USER:
             ip_lines += f"\n   +{len(f.ips) - _MAX_IPS_SHOWN_PER_USER} ещё"
         tg_str = f"tg:{f.telegram_id}" if f.telegram_id is not None else "нет telegram_id"
-        criteria_part = f"\n{_format_criteria_line(f)}" if hard else ""
-        entry = (
-            f"• <b>{html.escape(f.username)}</b> ({tg_str})\n"
-            f"  {_format_grouping_line(f)}{criteria_part}\n"
-            f"{ip_lines}\n"
-        )
+        if hard:
+            header_line = (
+                f"• <b>{html.escape(f.username)}</b> ({tg_str}) — "
+                f"критериев: {f.criteria_matched}/3\n"
+            )
+            stats_part = _format_criteria_breakdown(f)
+        else:
+            header_line = f"• <b>{html.escape(f.username)}</b> ({tg_str})\n"
+            stats_part = f"  {_format_grouping_line(f)}"
+        entry = f"{header_line}{stats_part}\n{ip_lines}\n"
         if used + len(entry) > budget:
             break
         lines.append(entry)
@@ -491,8 +520,8 @@ def _format_auto_block_digest(blocked: list[FlaggedUser]) -> str:
     for f in blocked:
         tg_str = f"tg:{f.telegram_id}"
         lines.append(
-            f"• <b>{html.escape(f.username)}</b> ({tg_str})\n"
-            f"  {_format_grouping_line(f)}\n{_format_criteria_line(f)}\n"
+            f"• <b>{html.escape(f.username)}</b> ({tg_str}) — критериев: {f.criteria_matched}/3\n"
+            f"{_format_criteria_breakdown(f)}\n"
         )
     return "".join(lines)
 
