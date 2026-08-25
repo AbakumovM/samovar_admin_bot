@@ -9,8 +9,10 @@ from src.apps.antifraud.controllers.scheduler.tasks import (
     _format_digest,
     _grouping_mode,
     _IpWhitelist,
+    _node_prefix,
     _resolve_and_filter_candidates,
     _resolve_asn,
+    _ru_node_group_count,
     _subnet_prefix,
 )
 from src.apps.antifraud.domain.models import (
@@ -490,9 +492,7 @@ def test_format_digest_shows_node_and_time() -> None:
 
 
 def test_format_digest_shows_clickable_ipinfo_link() -> None:
-    flagged = [
-        make_flagged(ips=(AggregatedIp(ip="9.9.9.9", node_names=("DE-1",), last_seen=_T1),))
-    ]
+    flagged = [make_flagged(ips=(AggregatedIp(ip="9.9.9.9", node_names=("DE-1",), last_seen=_T1),))]
     text = _format_digest(flagged, hard=True)
     assert 'href="https://ipinfo.io/9.9.9.9"' in text
 
@@ -502,8 +502,11 @@ def test_format_digest_shows_asn_org_when_present() -> None:
         make_flagged(
             ips=(
                 AggregatedIp(
-                    ip="1.1.1.1", node_names=("DE-1",), last_seen=_T1,
-                    asn=13335, asn_org="Cloudflare",
+                    ip="1.1.1.1",
+                    node_names=("DE-1",),
+                    last_seen=_T1,
+                    asn=13335,
+                    asn_org="Cloudflare",
                 ),
             )
         )
@@ -524,3 +527,57 @@ def test_format_digest_asn_grouping_shows_asn_count_in_header() -> None:
     flagged = [make_flagged(grouping_mode="asn", group_count=2, ip_count=8, threshold=5)]
     text = _format_digest(flagged, hard=True)
     assert "ASN: 2" in text
+
+
+# ---- RU node prefix extraction ----
+
+
+def test_node_prefix_splits_on_dash() -> None:
+    assert _node_prefix("RU-1") == "RU"
+    assert _node_prefix("DE-Frankfurt-2") == "DE"
+
+
+def test_node_prefix_returns_whole_name_without_dash() -> None:
+    assert _node_prefix("standalone") == "standalone"
+
+
+# ---- RU node group counting ----
+
+
+def test_ru_node_group_count_counts_only_ru_nodes() -> None:
+    ips = (
+        AggregatedIp(ip="1.1.1.1", node_names=("RU-1",), last_seen=_T1),
+        AggregatedIp(ip="2.2.2.2", node_names=("RU-2",), last_seen=_T1),
+        AggregatedIp(ip="3.3.3.3", node_names=("DE-1",), last_seen=_T1),
+    )
+
+    count = _ru_node_group_count(ips, "ip", 24, {"RU"})
+
+    assert count == 2
+
+
+def test_ru_node_group_count_zero_when_no_ru_nodes() -> None:
+    ips = (AggregatedIp(ip="3.3.3.3", node_names=("DE-1",), last_seen=_T1),)
+
+    count = _ru_node_group_count(ips, "ip", 24, {"RU"})
+
+    assert count == 0
+
+
+def test_ru_node_group_count_counts_ip_seen_on_both_ru_and_foreign_node() -> None:
+    ips = (AggregatedIp(ip="1.1.1.1", node_names=("RU-1", "DE-1"), last_seen=_T1),)
+
+    count = _ru_node_group_count(ips, "ip", 24, {"RU"})
+
+    assert count == 1
+
+
+def test_ru_node_group_count_respects_subnet_grouping_mode() -> None:
+    ips = (
+        AggregatedIp(ip="1.1.1.1", node_names=("RU-1",), last_seen=_T1),
+        AggregatedIp(ip="1.1.1.2", node_names=("RU-1",), last_seen=_T1),
+    )
+
+    count = _ru_node_group_count(ips, "subnet", 24, {"RU"})
+
+    assert count == 1

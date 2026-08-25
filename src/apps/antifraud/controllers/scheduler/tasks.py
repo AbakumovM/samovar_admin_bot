@@ -102,9 +102,7 @@ def _parse_user_connections(user_entry: dict[str, Any]) -> NodeUserConnections:
         seen = _parse_iso(ip_entry["lastSeen"])
         if ip not in latest_seen or seen > latest_seen[ip]:
             latest_seen[ip] = seen
-    sightings = tuple(
-        IpSighting(ip=ip, last_seen=seen) for ip, seen in sorted(latest_seen.items())
-    )
+    sightings = tuple(IpSighting(ip=ip, last_seen=seen) for ip, seen in sorted(latest_seen.items()))
     return NodeUserConnections(user_id=int(user_entry["userId"]), ips=sightings)
 
 
@@ -298,6 +296,24 @@ def _compute_group_count(
     return len(ip_map)
 
 
+def _node_prefix(node_name: str) -> str:
+    return node_name.split("-")[0] if "-" in node_name else node_name
+
+
+def _ru_node_group_count(
+    ips: tuple[AggregatedIp, ...],
+    mode: GroupingMode,
+    subnet_prefix_v4: int,
+    ru_prefixes: set[str],
+) -> int:
+    ru_only = {
+        agg.ip: agg
+        for agg in ips
+        if any(_node_prefix(name) in ru_prefixes for name in agg.node_names)
+    }
+    return _compute_group_count(ru_only, mode, subnet_prefix_v4)
+
+
 def _resolve_and_filter_candidates(
     aggregated: dict[int, dict[str, AggregatedIp]],
     user_index: dict[int, dict[str, Any]],
@@ -339,8 +355,10 @@ def _resolve_and_filter_candidates(
         if group_count <= device_limit:
             continue
 
-        hard_threshold = device_limit + config.antifraud_ip_slack + int(
-            device_limit * config.antifraud_ip_slack_multiplier
+        hard_threshold = (
+            device_limit
+            + config.antifraud_ip_slack
+            + int(device_limit * config.antifraud_ip_slack_multiplier)
         )
         ips_sorted = tuple(sorted(ip_map.values(), key=lambda a: a.last_seen, reverse=True))
         username = str(record.get("username", f"id:{uid}"))
