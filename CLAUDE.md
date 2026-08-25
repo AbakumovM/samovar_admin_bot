@@ -138,6 +138,19 @@ ANTIFRAUD_IP_SLACK_MULTIPLIER)` — «жёсткий» (действие), вы�
 умолчанию выключено (`ANTIFRAUD_ENABLED=false`). По запросу —
 `/antifraud_check`.
 
+**Авто-блок по 3 критериям** — система многоуровневой проверки перед блокировкой подписки:
+пользователь помечается как подозрительный, если выполняются хотя бы 2 из 3 условий:
+(1) превышен общий порог конкурентных IP (`hwidDeviceLimit` + `ANTIFRAUD_IP_SLACK`);
+(2) обнаружена концентрация подключений на RU-нодах выше `ANTIFRAUD_RU_NODE_IP_THRESHOLD`;
+(3) отсутствует активная платёж в системе samovarbot (проверяется через `GET /internal/users/{id}/subscription`).
+При `criteria_matched >= 2` в дайджесте антифрода появляется кнопка «Заблокировать» (требует
+известного `telegram_id` пользователя), позволяющая администратору ручных блокировать подписку —
+вызывает `POST /internal/users/{id}/block` на samovarbot и переводит подписку в `DISABLED` в панели.
+При `criteria_matched == 3` и включённом `ANTIFRAUD_AUTO_BLOCK_ENABLED=true` блокировка
+выполняется автоматически без кнопки, уведомление приходит как батч-дайджест авто-блоков.
+По умолчанию авто-блок выключен (`ANTIFRAUD_AUTO_BLOCK_ENABLED=false`), кнопка и
+дайджесты работают независимо.
+
 ## БД (таблицы)
 
 - `incidents` — инциденты (node_uuid, started_at, resolved_at, restart_attempts, escalated, downtime_seconds)
@@ -190,6 +203,11 @@ ANTIFRAUD_MAXMIND_ACCOUNT_ID=              # Аккаунт MaxMind, нужен 
 ANTIFRAUD_MAXMIND_LICENSE_KEY=             # Лицензионный ключ MaxMind (бесплатный)
 ANTIFRAUD_ASN_DATABASE_PATH=./geoip/GeoLite2-ASN.mmdb  # Путь к базе GeoLite2-ASN
 ANTIFRAUD_MAXMIND_UPDATE_INTERVAL_HOURS=168  # Интервал автообновления базы (недельный по умолчанию)
+ANTIFRAUD_AUTO_BLOCK_ENABLED=false         # Авто-блок при 3/3 критериях, по умолчанию: false
+ANTIFRAUD_RU_NODE_PREFIXES=["RU"]          # Префиксы имён нод, считающихся RU для критерия концентрации
+ANTIFRAUD_RU_NODE_IP_THRESHOLD=2           # Порог IP именно на RU-нодах (не зависит от hwidDeviceLimit)
+SAMOVARBOT_BASE_URL=                        # Базовый URL сервиса подписок (samovarbot)
+SAMOVARBOT_INTERNAL_API_KEY=                # Ключ для internal API samovarbot (X-Internal-Api-Key)
 ```
 
 **Важно**: `ADMIN_IDS` должен быть в JSON-формате `[id1,id2]`.
