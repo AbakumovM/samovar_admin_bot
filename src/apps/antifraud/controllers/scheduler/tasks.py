@@ -542,6 +542,31 @@ def _make_digest_keyboard(flagged: list[FlaggedUser]) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
+def _mark_blocked_in_keyboard(
+    keyboard: InlineKeyboardMarkup, remnawave_id: int
+) -> InlineKeyboardMarkup:
+    """Replace the just-clicked user's button with an inert "done" marker.
+
+    Digests list several users per message, each with its own row — this
+    only swaps the one row matching remnawave_id, leaving every other
+    user's still-actionable button untouched. The replacement points at
+    antifraud_noop instead of repeating the block call, so a second tap
+    can't be mistaken for (or trigger) another block attempt.
+    """
+    new_rows = []
+    for row in keyboard.inline_keyboard:
+        new_row = []
+        for button in row:
+            if (button.callback_data or "").startswith(f"antifraud_block:{remnawave_id}:"):
+                new_row.append(
+                    InlineKeyboardButton(text="✅ Заблокирован", callback_data="antifraud_noop")
+                )
+            else:
+                new_row.append(button)
+        new_rows.append(new_row)
+    return InlineKeyboardMarkup(inline_keyboard=new_rows)
+
+
 async def _resolve_user(
     raw_client: httpx.AsyncClient, cache: UserLookupCache, user_id: int
 ) -> dict[str, Any] | None:

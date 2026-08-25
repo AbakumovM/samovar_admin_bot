@@ -8,7 +8,11 @@ from dishka.integrations.aiogram import FromDishka, inject
 from remnawave import RemnawaveSDK
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from src.apps.antifraud.controllers.scheduler.tasks import _drop_connections, _run_antifraud_scan
+from src.apps.antifraud.controllers.scheduler.tasks import (
+    _drop_connections,
+    _mark_blocked_in_keyboard,
+    _run_antifraud_scan,
+)
 from src.config import Config
 from src.infrastructure.geoip.asn import AsnResolver
 from src.infrastructure.remnawave.user_cache import UserLookupCache
@@ -57,6 +61,11 @@ async def cmd_antifraud_check(
         await status.edit_text(f"✅ Проверка завершена: уведомление отправлено ({notified}) ↑")
 
 
+@router.callback_query(lambda c: c.data == "antifraud_noop")
+async def callback_noop(callback: CallbackQuery) -> None:
+    await callback.answer("Уже заблокирован ✅")
+
+
 @router.callback_query(lambda c: c.data is not None and c.data.startswith("antifraud_block:"))
 @inject
 async def callback_block_user(
@@ -74,4 +83,12 @@ async def callback_block_user(
         await callback.answer("⚠️ Не удалось заблокировать", show_alert=True)
         return
     await _drop_connections(raw_client, remnawave_id)
+
+    if isinstance(callback.message, Message) and callback.message.reply_markup is not None:
+        try:
+            new_keyboard = _mark_blocked_in_keyboard(callback.message.reply_markup, remnawave_id)
+            await callback.message.edit_reply_markup(reply_markup=new_keyboard)
+        except Exception as e:
+            logger.warning("Antifraud: failed to update keyboard after block: %s", e)
+
     await callback.answer("🚫 Пользователь заблокирован")

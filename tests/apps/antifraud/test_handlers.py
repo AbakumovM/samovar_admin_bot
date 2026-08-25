@@ -1,7 +1,10 @@
 from unittest.mock import AsyncMock, MagicMock, patch
 
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message
+
 from src.apps.antifraud.controllers.telegram.handlers import (
     callback_block_user,
+    callback_noop,
     cmd_antifraud_check,
 )
 
@@ -125,3 +128,60 @@ async def test_callback_block_user_parses_remnawave_and_telegram_ids() -> None:
         "/connections/drop",
         json={"dropBy": {"by": "userIds", "userIds": [42]}, "targetNodes": {"target": "allNodes"}},
     )
+
+
+async def test_callback_block_user_updates_keyboard_on_success() -> None:
+    callback = _make_callback("antifraud_block:42:555")
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="🚫 Заблокировать", callback_data="antifraud_block:42:555")]
+        ]
+    )
+    message = MagicMock(spec=Message)
+    message.reply_markup = keyboard
+    message.edit_reply_markup = AsyncMock()
+    callback.message = message
+    raw_client = MagicMock()
+    raw_client.post = AsyncMock(return_value=MagicMock(raise_for_status=MagicMock()))
+    samovarbot_client = MagicMock()
+
+    with patch(
+        "src.apps.antifraud.controllers.telegram.handlers.block_user",
+        AsyncMock(return_value=True),
+    ):
+        await _callback_block_user(callback, raw_client, samovarbot_client)
+
+    message.edit_reply_markup.assert_awaited_once()
+    new_keyboard = message.edit_reply_markup.await_args.kwargs["reply_markup"]
+    button = new_keyboard.inline_keyboard[0][0]
+    assert button.callback_data == "antifraud_noop"
+    assert button.text == "✅ Заблокирован"
+
+
+async def test_callback_block_user_keyboard_update_failure_still_confirms() -> None:
+    callback = _make_callback("antifraud_block:42:555")
+    message = MagicMock(spec=Message)
+    message.reply_markup = InlineKeyboardMarkup(inline_keyboard=[[]])
+    message.edit_reply_markup = AsyncMock(side_effect=RuntimeError("message too old"))
+    callback.message = message
+    raw_client = MagicMock()
+    raw_client.post = AsyncMock(return_value=MagicMock(raise_for_status=MagicMock()))
+    samovarbot_client = MagicMock()
+
+    with patch(
+        "src.apps.antifraud.controllers.telegram.handlers.block_user",
+        AsyncMock(return_value=True),
+    ):
+        await _callback_block_user(callback, raw_client, samovarbot_client)
+
+    callback.answer.assert_awaited_once()
+    assert "заблокирован" in callback.answer.await_args.args[0]
+
+
+async def test_callback_noop_answers_toast() -> None:
+    callback = _make_callback("antifraud_noop")
+
+    await callback_noop(callback)
+
+    callback.answer.assert_awaited_once()
+    assert "заблокирован" in callback.answer.await_args.args[0].lower()

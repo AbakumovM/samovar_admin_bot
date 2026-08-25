@@ -15,6 +15,7 @@ from src.apps.antifraud.controllers.scheduler.tasks import (
     _grouping_mode,
     _IpWhitelist,
     _make_digest_keyboard,
+    _mark_blocked_in_keyboard,
     _node_prefix,
     _resolve_and_filter_candidates,
     _resolve_asn,
@@ -597,6 +598,32 @@ def test_make_digest_keyboard_omits_block_button_without_telegram_id() -> None:
     keyboard = _make_digest_keyboard([f])
 
     assert keyboard.inline_keyboard == []
+
+
+def test_mark_blocked_in_keyboard_replaces_matching_button() -> None:
+    keyboard = _make_digest_keyboard(
+        [
+            make_flagged(remnawave_id=1, telegram_id=555),
+            make_flagged(remnawave_id=2, telegram_id=777),
+        ]
+    )
+
+    updated = _mark_blocked_in_keyboard(keyboard, remnawave_id=1)
+
+    buttons = [btn for row in updated.inline_keyboard for btn in row]
+    blocked_btn = next(b for b in buttons if b.callback_data == "antifraud_noop")
+    assert blocked_btn.text == "✅ Заблокирован"
+    other_btn = next(b for b in buttons if b.callback_data == "antifraud_block:2:777")
+    assert other_btn.text == "🚫 Заблокировать"
+
+
+def test_mark_blocked_in_keyboard_no_match_leaves_keyboard_unchanged() -> None:
+    keyboard = _make_digest_keyboard([make_flagged(remnawave_id=1, telegram_id=555)])
+
+    updated = _mark_blocked_in_keyboard(keyboard, remnawave_id=999)
+
+    callback_datas = [btn.callback_data for row in updated.inline_keyboard for btn in row]
+    assert callback_datas == ["antifraud_block:1:555"]
 
 
 # ---- auto-block digest ----
