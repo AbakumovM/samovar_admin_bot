@@ -50,6 +50,27 @@ async def test_check_no_active_payment_none_on_network_error() -> None:
     assert result is None
 
 
+async def test_check_no_active_payment_none_on_missing_key() -> None:
+    client = MagicMock()
+    client.get = AsyncMock(return_value=_response(200, {}))
+
+    result = await check_no_active_payment(client, 999)
+
+    assert result is None
+
+
+async def test_check_no_active_payment_none_on_invalid_json() -> None:
+    response = MagicMock()
+    response.status_code = 200
+    response.json = MagicMock(side_effect=ValueError("not json"))
+    client = MagicMock()
+    client.get = AsyncMock(return_value=response)
+
+    result = await check_no_active_payment(client, 999)
+
+    assert result is None
+
+
 async def test_block_user_true_on_200() -> None:
     client = MagicMock()
     client.post = AsyncMock(return_value=_response(200, {"blocked": True}))

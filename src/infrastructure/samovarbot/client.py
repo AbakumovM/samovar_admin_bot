@@ -40,8 +40,15 @@ async def check_no_active_payment(client: SamovarbotClient, telegram_id: int) ->
             response.status_code,
         )
         return None
-    payload: dict[str, Any] = response.json()
-    return not bool(payload["has_active_subscription"])
+    try:
+        payload: dict[str, Any] = response.json()
+        has_active_subscription = payload["has_active_subscription"]
+    except (ValueError, KeyError) as e:
+        logger.warning(
+            "Antifraud: payment-status response for tg:%d is malformed: %s", telegram_id, e
+        )
+        return None
+    return not bool(has_active_subscription)
 
 
 async def block_user(client: SamovarbotClient, telegram_id: int, reason: str) -> bool:
