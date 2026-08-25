@@ -658,6 +658,13 @@ def test_node_prefix_returns_whole_name_without_dash() -> None:
     assert _node_prefix("standalone") == "standalone"
 
 
+def test_node_prefix_handles_letters_directly_followed_by_digits() -> None:
+    # Real panel node names aren't uniformly "PREFIX-rest" — "RU11" (no
+    # dash) coexists with "RU-6" (dash) on the same fleet.
+    assert _node_prefix("RU11") == "RU"
+    assert _node_prefix("US2") == "US"
+
+
 # ---- RU node group counting ----
 
 
@@ -698,6 +705,21 @@ def test_ru_node_group_count_respects_subnet_grouping_mode() -> None:
     count = _ru_node_group_count(ips, "subnet", 24, {"RU"})
 
     assert count == 1
+
+
+def test_ru_node_group_count_counts_dashless_node_names() -> None:
+    # Regression: real fleet mixes "RU11" (no dash) with "RU-6" (dash) —
+    # both must count as RU nodes.
+    ips = (
+        AggregatedIp(ip="1.1.1.1", node_names=("RU11",), last_seen=_T1),
+        AggregatedIp(ip="2.2.2.2", node_names=("RU11",), last_seen=_T1),
+        AggregatedIp(ip="3.3.3.3", node_names=("RU-6",), last_seen=_T1),
+        AggregatedIp(ip="4.4.4.4", node_names=("US-2",), last_seen=_T1),
+    )
+
+    count = _ru_node_group_count(ips, "ip", 24, {"RU"})
+
+    assert count == 3
 
 
 # ---- drop connections ----

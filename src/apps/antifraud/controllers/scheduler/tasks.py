@@ -3,6 +3,7 @@ import dataclasses
 import html
 import ipaddress
 import logging
+import re
 from datetime import UTC, datetime
 from typing import Any
 
@@ -302,8 +303,21 @@ def _compute_group_count(
     return len(ip_map)
 
 
+_LEADING_LETTERS_RE = re.compile(r"^[A-Za-z]+")
+
+
 def _node_prefix(node_name: str) -> str:
-    return node_name.split("-")[0] if "-" in node_name else node_name
+    """Extracts the region/provider prefix from a node name.
+
+    Node naming on the panel isn't uniformly "PREFIX-rest" — some nodes are
+    e.g. "RU-6" (dash before the number), others "RU11" (no dash at all).
+    Splitting on "-" alone missed the latter (returned "RU11" whole, never
+    matching a configured "RU" prefix), silently undercounting the RU-node
+    concentration criterion. Take the leading run of letters instead, which
+    handles both conventions the same way.
+    """
+    match = _LEADING_LETTERS_RE.match(node_name)
+    return match.group(0) if match else node_name
 
 
 def _ru_node_group_count(
