@@ -3,6 +3,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import httpx
 
 from src.apps.antifraud.controllers.telegram.handlers import (
+    callback_block_user,
     callback_drop_connections,
     cmd_antifraud_check,
 )
@@ -12,6 +13,7 @@ from src.apps.antifraud.controllers.telegram.handlers import (
 # bypass DI entirely and call the original undecorated function directly.
 _callback_drop_connections = callback_drop_connections.__dishka_orig_func__  # type: ignore[attr-defined]
 _cmd_antifraud_check = cmd_antifraud_check.__dishka_orig_func__  # type: ignore[attr-defined]
+_callback_block_user = callback_block_user.__dishka_orig_func__  # type: ignore[attr-defined]
 
 
 def _make_callback(data: str) -> MagicMock:
@@ -96,3 +98,64 @@ async def test_cmd_antifraud_check_reports_error() -> None:
 
     status = message.answer.return_value
     assert "ошибк" in status.edit_text.await_args.args[0].lower()
+
+
+async def test_callback_block_user_success() -> None:
+    callback = _make_callback("antifraud_block:42:555")
+    raw_client = MagicMock()
+    drop_response = MagicMock()
+    drop_response.raise_for_status = MagicMock()
+    raw_client.post = AsyncMock(return_value=drop_response)
+    samovarbot_client = MagicMock()
+
+    with patch(
+        "src.apps.antifraud.controllers.telegram.handlers.block_user",
+        AsyncMock(return_value=True),
+    ) as block_mock:
+        await _callback_block_user(callback, raw_client, samovarbot_client)
+
+    block_mock.assert_awaited_once_with(
+        samovarbot_client, 555, "antifraud: manual block (remnawave_id=42)"
+    )
+    raw_client.post.assert_awaited_once()  # _drop_connections был вызван
+    callback.answer.assert_awaited_once()
+    assert "заблокирован" in callback.answer.await_args.args[0]
+
+
+async def test_callback_block_user_failure_does_not_drop_connections() -> None:
+    callback = _make_callback("antifraud_block:42:555")
+    raw_client = MagicMock()
+    raw_client.post = AsyncMock()
+    samovarbot_client = MagicMock()
+
+    with patch(
+        "src.apps.antifraud.controllers.telegram.handlers.block_user",
+        AsyncMock(return_value=False),
+    ):
+        await _callback_block_user(callback, raw_client, samovarbot_client)
+
+    raw_client.post.assert_not_awaited()
+    callback.answer.assert_awaited_once()
+    assert callback.answer.await_args.kwargs.get("show_alert") is True
+    assert "не удалось" in callback.answer.await_args.args[0].lower()
+
+
+async def test_callback_block_user_parses_remnawave_and_telegram_ids() -> None:
+    callback = _make_callback("antifraud_block:42:555")
+    raw_client = MagicMock()
+    raw_client.post = AsyncMock(return_value=MagicMock(raise_for_status=MagicMock()))
+    samovarbot_client = MagicMock()
+
+    with patch(
+        "src.apps.antifraud.controllers.telegram.handlers.block_user",
+        AsyncMock(return_value=True),
+    ) as block_mock:
+        await _callback_block_user(callback, raw_client, samovarbot_client)
+
+    # block_user вызывается с telegram_id (555), не с remnawave_id (42)
+    assert block_mock.await_args.args[1] == 555
+    # _drop_connections (через raw_client.post) использует remnawave_id (42)
+    raw_client.post.assert_awaited_once_with(
+        "/connections/drop",
+        json={"dropBy": {"by": "userIds", "userIds": [42]}, "targetNodes": {"target": "allNodes"}},
+    )

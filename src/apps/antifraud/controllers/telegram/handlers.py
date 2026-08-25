@@ -12,6 +12,7 @@ from src.apps.antifraud.controllers.scheduler.tasks import _drop_connections, _r
 from src.config import Config
 from src.infrastructure.geoip.asn import AsnResolver
 from src.infrastructure.remnawave.user_cache import UserLookupCache
+from src.infrastructure.samovarbot.client import SamovarbotClient, block_user
 
 logger = logging.getLogger(__name__)
 
@@ -59,3 +60,23 @@ async def callback_drop_connections(
         await callback.answer("🔌 Отключение запрошено")
     else:
         await callback.answer("⚠️ Не удалось отправить запрос", show_alert=True)
+
+
+@router.callback_query(lambda c: c.data is not None and c.data.startswith("antifraud_block:"))
+@inject
+async def callback_block_user(
+    callback: CallbackQuery,
+    raw_client: FromDishka[httpx.AsyncClient],
+    samovarbot_client: FromDishka[SamovarbotClient],
+) -> None:
+    parts = (callback.data or "").split(":")
+    remnawave_id = int(parts[1])
+    telegram_id = int(parts[2])
+    reason = f"antifraud: manual block (remnawave_id={remnawave_id})"
+
+    blocked = await block_user(samovarbot_client, telegram_id, reason)
+    if not blocked:
+        await callback.answer("⚠️ Не удалось заблокировать", show_alert=True)
+        return
+    await _drop_connections(raw_client, remnawave_id)
+    await callback.answer("🚫 Пользователь заблокирован")
