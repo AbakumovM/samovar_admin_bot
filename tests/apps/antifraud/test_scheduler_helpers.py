@@ -644,6 +644,10 @@ def test_format_auto_block_digest_lists_users() -> None:
     assert "fraudster1" in digest
     assert "автоматически заблокировано" in digest
     assert "3/3" in digest
+    # Regression: auto-block digest used to omit IPs entirely, leaving admins
+    # unable to cross-check the block against the panel's own connection data.
+    assert "1.1.1.1" in digest
+    assert "2.2.2.2" in digest
 
 
 # ---- RU node prefix extraction ----

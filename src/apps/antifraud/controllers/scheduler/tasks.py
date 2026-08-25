@@ -533,9 +533,13 @@ def _format_auto_block_digest(blocked: list[FlaggedUser]) -> str:
     lines = [header]
     for f in blocked:
         tg_str = f"tg:{f.telegram_id}"
+        examples = f.ips[:_MAX_IPS_SHOWN_PER_USER]
+        ip_lines = "\n".join(_format_ip_line(ip) for ip in examples)
+        if len(f.ips) > _MAX_IPS_SHOWN_PER_USER:
+            ip_lines += f"\n   +{len(f.ips) - _MAX_IPS_SHOWN_PER_USER} ещё"
         lines.append(
             f"• <b>{html.escape(f.username)}</b> ({tg_str}) — критериев: {f.criteria_matched}/3\n"
-            f"{_format_criteria_breakdown(f)}\n"
+            f"{_format_criteria_breakdown(f)}\n{ip_lines}\n"
         )
     return "".join(lines)
 
