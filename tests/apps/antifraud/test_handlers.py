@@ -1,17 +1,13 @@
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import httpx
-
 from src.apps.antifraud.controllers.telegram.handlers import (
     callback_block_user,
-    callback_drop_connections,
     cmd_antifraud_check,
 )
 
 # dishka's @inject strips FromDishka-annotated params from the wrapped
 # signature and resolves them from a container instead — for a unit test we
 # bypass DI entirely and call the original undecorated function directly.
-_callback_drop_connections = callback_drop_connections.__dishka_orig_func__  # type: ignore[attr-defined]
 _cmd_antifraud_check = cmd_antifraud_check.__dishka_orig_func__  # type: ignore[attr-defined]
 _callback_block_user = callback_block_user.__dishka_orig_func__  # type: ignore[attr-defined]
 
@@ -21,36 +17,6 @@ def _make_callback(data: str) -> MagicMock:
     callback.data = data
     callback.answer = AsyncMock()
     return callback
-
-
-async def test_callback_drop_connections_success() -> None:
-    callback = _make_callback("antifraud_drop:42")
-    response = MagicMock()
-    response.raise_for_status = MagicMock()
-    raw_client = MagicMock()
-    raw_client.post = AsyncMock(return_value=response)
-
-    await _callback_drop_connections(callback, raw_client)
-
-    raw_client.post.assert_awaited_once_with(
-        "/connections/drop",
-        json={"dropBy": {"by": "userIds", "userIds": [42]}, "targetNodes": {"target": "allNodes"}},
-    )
-    callback.answer.assert_awaited_once()
-    assert "запрошено" in callback.answer.await_args.args[0]
-
-
-async def test_callback_drop_connections_http_error_shows_alert() -> None:
-    callback = _make_callback("antifraud_drop:42")
-    raw_client = MagicMock()
-    raw_client.post = AsyncMock(
-        side_effect=httpx.HTTPStatusError("403", request=MagicMock(), response=MagicMock())
-    )
-
-    await _callback_drop_connections(callback, raw_client)
-
-    callback.answer.assert_awaited_once()
-    assert callback.answer.await_args.kwargs.get("show_alert") is True
 
 
 def _make_message() -> MagicMock:

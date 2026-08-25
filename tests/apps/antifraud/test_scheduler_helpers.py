@@ -573,24 +573,13 @@ def test_format_criteria_line_shows_unknown_payment() -> None:
 # ---- digest keyboard ----
 
 
-def test_make_digest_keyboard_adds_block_button_when_criteria_matched_high() -> None:
-    f = make_flagged(telegram_id=555, criteria_matched=2)
-
-    keyboard = _make_digest_keyboard([f])
-
-    callback_datas = [btn.callback_data for row in keyboard.inline_keyboard for btn in row]
-    assert "antifraud_drop:1" in callback_datas
-    assert "antifraud_block:1:555" in callback_datas
-
-
-def test_make_digest_keyboard_omits_block_button_when_criteria_matched_low() -> None:
+def test_make_digest_keyboard_adds_block_button_regardless_of_criteria_matched() -> None:
     f = make_flagged(telegram_id=555, criteria_matched=1)
 
     keyboard = _make_digest_keyboard([f])
 
     callback_datas = [btn.callback_data for row in keyboard.inline_keyboard for btn in row]
-    assert "antifraud_drop:1" in callback_datas
-    assert not any((cd or "").startswith("antifraud_block:") for cd in callback_datas)
+    assert "antifraud_block:1:555" in callback_datas
 
 
 def test_make_digest_keyboard_omits_block_button_without_telegram_id() -> None:
@@ -598,8 +587,7 @@ def test_make_digest_keyboard_omits_block_button_without_telegram_id() -> None:
 
     keyboard = _make_digest_keyboard([f])
 
-    callback_datas = [btn.callback_data for row in keyboard.inline_keyboard for btn in row]
-    assert not any((cd or "").startswith("antifraud_block:") for cd in callback_datas)
+    assert keyboard.inline_keyboard == []
 
 
 # ---- auto-block digest ----

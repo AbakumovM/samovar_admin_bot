@@ -57,19 +57,6 @@ async def cmd_antifraud_check(
         await status.edit_text(f"✅ Проверка завершена: уведомление отправлено ({notified}) ↑")
 
 
-@router.callback_query(lambda c: c.data is not None and c.data.startswith("antifraud_drop:"))
-@inject
-async def callback_drop_connections(
-    callback: CallbackQuery,
-    raw_client: FromDishka[httpx.AsyncClient],
-) -> None:
-    remnawave_id = int((callback.data or "").split(":", 1)[1])
-    if await _drop_connections(raw_client, remnawave_id):
-        await callback.answer("🔌 Отключение запрошено")
-    else:
-        await callback.answer("⚠️ Не удалось отправить запрос", show_alert=True)
-
-
 @router.callback_query(lambda c: c.data is not None and c.data.startswith("antifraud_block:"))
 @inject
 async def callback_block_user(

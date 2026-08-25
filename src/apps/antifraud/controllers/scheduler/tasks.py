@@ -500,20 +500,16 @@ def _format_auto_block_digest(blocked: list[FlaggedUser]) -> str:
 def _make_digest_keyboard(flagged: list[FlaggedUser]) -> InlineKeyboardMarkup:
     rows = []
     for f in flagged[:_MAX_USERS_SHOWN]:
-        row = [
-            InlineKeyboardButton(
-                text=f"🔌 Отключить {f.username}",
-                callback_data=f"antifraud_drop:{f.remnawave_id}",
-            )
-        ]
-        if f.telegram_id is not None and f.criteria_matched >= 2:
-            row.append(
+        if f.telegram_id is None:
+            continue
+        rows.append(
+            [
                 InlineKeyboardButton(
                     text="🚫 Заблокировать",
                     callback_data=f"antifraud_block:{f.remnawave_id}:{f.telegram_id}",
                 )
-            )
-        rows.append(row)
+            ]
+        )
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
