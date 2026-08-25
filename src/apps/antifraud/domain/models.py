@@ -47,3 +47,7 @@ class FlaggedUser:
     hwid_device_limit: int
     threshold: int
     is_hard: bool
+    ru_node_ip_count: int = 0
+    ru_node_threshold: int = 0
+    no_active_payment: bool | None = None
+    criteria_matched: int = 0
