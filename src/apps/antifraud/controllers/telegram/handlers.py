@@ -8,7 +8,7 @@ from dishka.integrations.aiogram import FromDishka, inject
 from remnawave import RemnawaveSDK
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from src.apps.antifraud.controllers.scheduler.tasks import _run_antifraud_scan
+from src.apps.antifraud.controllers.scheduler.tasks import _drop_connections, _run_antifraud_scan
 from src.config import Config
 from src.infrastructure.geoip.asn import AsnResolver
 from src.infrastructure.remnawave.user_cache import UserLookupCache
@@ -55,16 +55,7 @@ async def callback_drop_connections(
     raw_client: FromDishka[httpx.AsyncClient],
 ) -> None:
     remnawave_id = int((callback.data or "").split(":", 1)[1])
-    try:
-        response = await raw_client.post(
-            "/connections/drop",
-            json={
-                "dropBy": {"by": "userIds", "userIds": [remnawave_id]},
-                "targetNodes": {"target": "allNodes"},
-            },
-        )
-        response.raise_for_status()
+    if await _drop_connections(raw_client, remnawave_id):
         await callback.answer("🔌 Отключение запрошено")
-    except Exception as e:
-        logger.error("Antifraud drop-connections failed for %d: %s", remnawave_id, e)
+    else:
         await callback.answer("⚠️ Не удалось отправить запрос", show_alert=True)

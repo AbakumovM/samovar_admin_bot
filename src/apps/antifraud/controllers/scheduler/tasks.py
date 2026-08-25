@@ -517,6 +517,22 @@ async def _resolve_users_bounded(
     return {uid: record for uid, record in resolved if record is not None}
 
 
+async def _drop_connections(raw_client: httpx.AsyncClient, remnawave_id: int) -> bool:
+    try:
+        response = await raw_client.post(
+            "/connections/drop",
+            json={
+                "dropBy": {"by": "userIds", "userIds": [remnawave_id]},
+                "targetNodes": {"target": "allNodes"},
+            },
+        )
+        response.raise_for_status()
+        return True
+    except Exception as e:
+        logger.error("Antifraud: drop-connections failed for %d: %s", remnawave_id, e)
+        return False
+
+
 async def _run_antifraud_scan(
     config: Config,
     session_factory: async_sessionmaker,  # type: ignore[type-arg]

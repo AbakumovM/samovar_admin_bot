@@ -1,9 +1,11 @@
 from datetime import UTC, datetime
+from unittest.mock import AsyncMock, MagicMock
 
 from src.apps.antifraud.controllers.scheduler.tasks import (
     TELEGRAM_MESSAGE_LIMIT,
     _aggregate_ips_by_user,
     _compute_group_count,
+    _drop_connections,
     _filter_recent_ips,
     _filter_whitelisted_ips,
     _format_digest,
@@ -581,3 +583,30 @@ def test_ru_node_group_count_respects_subnet_grouping_mode() -> None:
     count = _ru_node_group_count(ips, "subnet", 24, {"RU"})
 
     assert count == 1
+
+
+# ---- drop connections ----
+
+
+async def test_drop_connections_true_on_success() -> None:
+    raw_client = MagicMock()
+    response = MagicMock()
+    response.raise_for_status = MagicMock()
+    raw_client.post = AsyncMock(return_value=response)
+
+    result = await _drop_connections(raw_client, 42)
+
+    assert result is True
+    raw_client.post.assert_awaited_once_with(
+        "/connections/drop",
+        json={"dropBy": {"by": "userIds", "userIds": [42]}, "targetNodes": {"target": "allNodes"}},
+    )
+
+
+async def test_drop_connections_false_on_http_error() -> None:
+    raw_client = MagicMock()
+    raw_client.post = AsyncMock(side_effect=Exception("boom"))
+
+    result = await _drop_connections(raw_client, 42)
+
+    assert result is False
