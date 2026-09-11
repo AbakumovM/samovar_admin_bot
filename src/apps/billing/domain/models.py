@@ -15,15 +15,5 @@ class BillingNodeInfo:
 
 
 @dataclass(frozen=True)
-class PaymentRecordInfo:
-    uuid: str
-    provider_name: str
-    amount: float
-    payment_date: datetime
-
-
-@dataclass(frozen=True)
 class BillingStatsInfo:
     upcoming_nodes_count: int
-    current_month_payments: float
-    total_spent: float

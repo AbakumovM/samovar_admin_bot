@@ -2,7 +2,6 @@ import asyncio
 import logging
 from datetime import UTC, datetime, timedelta
 
-import httpx
 from aiogram import Bot
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from remnawave import RemnawaveSDK
@@ -14,11 +13,16 @@ from src.config import Config
 logger = logging.getLogger(__name__)
 
 
-def _format_billing_alert(node: BillingNodeInfo, currency: str) -> str:
+def _format_billing_alert(node: BillingNodeInfo) -> str:
     date_str = node.next_billing_at.strftime("%d.%m.%Y")
-    days_text = "сегодня!" if node.days_until == 0 else f"через {node.days_until} дн."
+    if node.days_until < 0:
+        title = "🔴 <b>Платёж просрочен</b>"
+        days_text = f"просрочен на {-node.days_until} дн."
+    else:
+        title = "⚠️ <b>Предстоящий платёж</b>"
+        days_text = "сегодня!" if node.days_until == 0 else f"через {node.days_until} дн."
     return (
-        f"⚠️ <b>Предстоящий платёж</b>\n\n"
+        f"{title}\n\n"
         f"Нода: <b>{node.node_name}</b>\n"
         f"Провайдер: {node.provider_name}\n"
         f"Дата: {date_str} ({days_text})"
@@ -40,9 +44,7 @@ def _make_alert_keyboard(node: BillingNodeInfo) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[row])
 
 
-async def billing_alert_task(
-    config: Config, sdk: RemnawaveSDK, raw_client: httpx.AsyncClient, bot: Bot
-) -> None:
+async def billing_alert_task(config: Config, sdk: RemnawaveSDK, bot: Bot) -> None:
     while True:
         now = datetime.now(UTC)
         next_check = now.replace(
@@ -59,11 +61,11 @@ async def billing_alert_task(
         await asyncio.sleep(sleep_seconds)
 
         try:
-            view = RemnawaveBillingView(sdk=sdk, raw_client=raw_client)
+            view = RemnawaveBillingView(sdk=sdk)
             nodes = await view.get_billing_nodes()
             for node in nodes:
-                if 0 <= node.days_until <= config.billing_alert_days_before:
-                    text = _format_billing_alert(node, config.billing_currency)
+                if node.days_until <= config.billing_alert_days_before:
+                    text = _format_billing_alert(node)
                     keyboard = _make_alert_keyboard(node)
                     for admin_id in config.admin_ids:
                         try:

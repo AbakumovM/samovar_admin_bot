@@ -45,6 +45,7 @@ class Config(BaseSettings):
         if isinstance(v, int):
             return [v]
         return list(v)  # type: ignore[arg-type]
+
     remnawave_base_url: str
     remnawave_token: str
     database_url: str
@@ -56,7 +57,6 @@ class Config(BaseSettings):
     traffic_check_interval_seconds: int = 3600
     traffic_anomaly_threshold_gb: float = 30.0
     traffic_anomaly_multiplier: float = 2.0
-    billing_currency: str = "$"
     billing_alert_days_before: int = 3
     billing_check_hour_utc: int = 17
     antifraud_enabled: bool = False

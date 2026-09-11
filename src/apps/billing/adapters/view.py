@@ -1,15 +1,13 @@
 from datetime import UTC, datetime
 
-import httpx
 from remnawave import RemnawaveSDK
 
-from src.apps.billing.domain.models import BillingNodeInfo, BillingStatsInfo, PaymentRecordInfo
+from src.apps.billing.domain.models import BillingNodeInfo, BillingStatsInfo
 
 
 class RemnawaveBillingView:
-    def __init__(self, sdk: RemnawaveSDK, raw_client: httpx.AsyncClient) -> None:
+    def __init__(self, sdk: RemnawaveSDK) -> None:
         self._sdk = sdk
-        self._raw_client = raw_client
 
     async def get_billing_nodes(self) -> list[BillingNodeInfo]:
         response = await self._sdk.infra_billing.get_billing_nodes()
@@ -31,29 +29,4 @@ class RemnawaveBillingView:
 
     async def get_billing_stats(self) -> BillingStatsInfo:
         response = await self._sdk.infra_billing.get_billing_nodes()
-        stats = response.stats
-        return BillingStatsInfo(
-            upcoming_nodes_count=int(stats.upcoming_nodes_count),
-            current_month_payments=float(stats.current_month_payments),
-            total_spent=float(stats.total_spent),
-        )
-
-    async def get_payment_history(self, limit: int = 10) -> list[PaymentRecordInfo]:
-        # Raw HTTP: panel v3.2.3 dropped `nodeUuid` from history records —
-        # payments are now tracked per-provider, not per-node — and the SDK's
-        # response model still requires the old (now-missing) fields.
-        response = await self._raw_client.get(
-            "/infra-billing/history", params={"start": 0, "size": limit}
-        )
-        response.raise_for_status()
-        records = response.json()["response"]["records"]
-        records.sort(key=lambda r: r["billedAt"], reverse=True)
-        return [
-            PaymentRecordInfo(
-                uuid=str(record["uuid"]),
-                provider_name=str(record["provider"]["name"]),
-                amount=float(record["amount"]),
-                payment_date=datetime.fromisoformat(record["billedAt"].replace("Z", "+00:00")),
-            )
-            for record in records[:limit]
-        ]
+        return BillingStatsInfo(upcoming_nodes_count=int(response.stats.upcoming_nodes_count))

@@ -78,8 +78,7 @@ restart_attempts >= max_attempts → эскалация 🚨 + стоп (бол�
 | `/top_traffic [day\|week\|month]` | Топ-10 потребителей трафика за период |
 | `/anomalies` | Пользователи с аномальным трафиком сегодня |
 | `/user_traffic <имя>` | Трафик пользователя за 7 дней |
-| `/billing` | Предстоящие платежи нод, статистика, кнопки оплаты |
-| `/billing_history` | Последние 10 записей платежей |
+| `/billing` | Предстоящие и просроченные платежи нод, кнопка отметки оплаты |
 | `/antifraud_check` | Разовая проверка на шеринг подписки (не дожидаясь расписания) |
 | `/restart <имя>` | Рестарт ноды |
 | `/restart_all` | Рестарт всех нод (с подтверждением) |
@@ -183,7 +182,6 @@ DAILY_REPORT_HOUR_UTC=17
 TRAFFIC_CHECK_INTERVAL_SECONDS=3600
 TRAFFIC_ANOMALY_THRESHOLD_GB=30.0
 TRAFFIC_ANOMALY_MULTIPLIER=2.0
-BILLING_CURRENCY=$               # Символ валюты, по умолчанию: $
 BILLING_ALERT_DAYS_BEFORE=3      # За сколько дней алертить, по умолчанию: 3
 BILLING_CHECK_HOUR_UTC=17        # Час UTC ежедневной проверки, по умолчанию: 17
 ANTIFRAUD_ENABLED=false                    # Включить антифрод-скан, по умолчанию: false
