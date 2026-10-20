@@ -16,11 +16,9 @@ from src.apps.antifraud.controllers.scheduler.tasks import (
     _IpWhitelist,
     _make_digest_keyboard,
     _mark_blocked_in_keyboard,
-    _node_prefix,
     _resolve_and_filter_candidates,
     _resolve_asn,
     _resolve_payment_bounded,
-    _ru_node_group_count,
     _subnet_prefix,
 )
 from src.apps.antifraud.domain.models import (
@@ -79,8 +77,6 @@ def make_flagged(
     telegram_id: int | None = 123,
     hwid_device_limit: int = 3,
     is_hard: bool = True,
-    ru_node_ip_count: int = 0,
-    ru_node_threshold: int = 0,
     no_active_payment: bool | None = None,
     criteria_matched: int = 0,
 ) -> FlaggedUser:
@@ -95,8 +91,6 @@ def make_flagged(
         hwid_device_limit=hwid_device_limit,
         threshold=threshold,
         is_hard=is_hard,
-        ru_node_ip_count=ru_node_ip_count,
-        ru_node_threshold=ru_node_threshold,
         no_active_payment=no_active_payment,
         criteria_matched=criteria_matched,
     )
@@ -548,35 +542,29 @@ def test_format_digest_asn_grouping_shows_asn_count_in_header() -> None:
 # ---- criteria line formatting ----
 
 
-def test_format_criteria_breakdown_shows_ru_and_payment_warning() -> None:
-    f = make_flagged(
-        ru_node_ip_count=5, ru_node_threshold=2, no_active_payment=True, criteria_matched=3
-    )
+def test_format_criteria_breakdown_shows_ip_and_payment_warning() -> None:
+    f = make_flagged(no_active_payment=True, criteria_matched=2)
 
     breakdown = _format_criteria_breakdown(f)
 
-    assert "RU-ноды: 5" in breakdown
-    assert "порог 2" in breakdown
     assert "нет активной подписки" in breakdown
     assert "превышен" in breakdown
+    assert "RU" not in breakdown
 
 
 def test_format_criteria_breakdown_shows_unknown_payment() -> None:
-    f = make_flagged(
-        ru_node_ip_count=0, ru_node_threshold=2, no_active_payment=None, criteria_matched=1
-    )
+    f = make_flagged(no_active_payment=None, criteria_matched=1)
 
     breakdown = _format_criteria_breakdown(f)
 
     assert "не проверялась" in breakdown
 
 
-def test_format_criteria_breakdown_marks_ru_not_exceeded_at_threshold() -> None:
-    f = make_flagged(ru_node_ip_count=2, ru_node_threshold=2, no_active_payment=False)
+def test_format_criteria_breakdown_shows_active_payment() -> None:
+    f = make_flagged(no_active_payment=False)
 
     breakdown = _format_criteria_breakdown(f)
 
-    assert "RU-ноды: 2 (порог 2) — не превышен" in breakdown
     assert "➖ Оплата: активна" in breakdown
 
 
@@ -593,7 +581,7 @@ def test_make_digest_keyboard_adds_block_button_regardless_of_criteria_matched()
 
 
 def test_make_digest_keyboard_omits_block_button_without_telegram_id() -> None:
-    f = make_flagged(telegram_id=None, criteria_matched=3)
+    f = make_flagged(telegram_id=None, criteria_matched=2)
 
     keyboard = _make_digest_keyboard([f])
 
@@ -633,97 +621,19 @@ def test_format_auto_block_digest_lists_users() -> None:
     f = make_flagged(
         username="fraudster1",
         telegram_id=555,
-        ru_node_ip_count=4,
-        ru_node_threshold=2,
         no_active_payment=True,
-        criteria_matched=3,
+        criteria_matched=2,
     )
 
     digest = _format_auto_block_digest([f])
 
     assert "fraudster1" in digest
     assert "автоматически заблокировано" in digest
-    assert "3/3" in digest
+    assert "2/2" in digest
     # Regression: auto-block digest used to omit IPs entirely, leaving admins
     # unable to cross-check the block against the panel's own connection data.
     assert "1.1.1.1" in digest
     assert "2.2.2.2" in digest
-
-
-# ---- RU node prefix extraction ----
-
-
-def test_node_prefix_splits_on_dash() -> None:
-    assert _node_prefix("RU-1") == "RU"
-    assert _node_prefix("DE-Frankfurt-2") == "DE"
-
-
-def test_node_prefix_returns_whole_name_without_dash() -> None:
-    assert _node_prefix("standalone") == "standalone"
-
-
-def test_node_prefix_handles_letters_directly_followed_by_digits() -> None:
-    # Real panel node names aren't uniformly "PREFIX-rest" — "RU11" (no
-    # dash) coexists with "RU-6" (dash) on the same fleet.
-    assert _node_prefix("RU11") == "RU"
-    assert _node_prefix("US2") == "US"
-
-
-# ---- RU node group counting ----
-
-
-def test_ru_node_group_count_counts_only_ru_nodes() -> None:
-    ips = (
-        AggregatedIp(ip="1.1.1.1", node_names=("RU-1",), last_seen=_T1),
-        AggregatedIp(ip="2.2.2.2", node_names=("RU-2",), last_seen=_T1),
-        AggregatedIp(ip="3.3.3.3", node_names=("DE-1",), last_seen=_T1),
-    )
-
-    count = _ru_node_group_count(ips, "ip", 24, {"RU"})
-
-    assert count == 2
-
-
-def test_ru_node_group_count_zero_when_no_ru_nodes() -> None:
-    ips = (AggregatedIp(ip="3.3.3.3", node_names=("DE-1",), last_seen=_T1),)
-
-    count = _ru_node_group_count(ips, "ip", 24, {"RU"})
-
-    assert count == 0
-
-
-def test_ru_node_group_count_counts_ip_seen_on_both_ru_and_foreign_node() -> None:
-    ips = (AggregatedIp(ip="1.1.1.1", node_names=("RU-1", "DE-1"), last_seen=_T1),)
-
-    count = _ru_node_group_count(ips, "ip", 24, {"RU"})
-
-    assert count == 1
-
-
-def test_ru_node_group_count_respects_subnet_grouping_mode() -> None:
-    ips = (
-        AggregatedIp(ip="1.1.1.1", node_names=("RU-1",), last_seen=_T1),
-        AggregatedIp(ip="1.1.1.2", node_names=("RU-1",), last_seen=_T1),
-    )
-
-    count = _ru_node_group_count(ips, "subnet", 24, {"RU"})
-
-    assert count == 1
-
-
-def test_ru_node_group_count_counts_dashless_node_names() -> None:
-    # Regression: real fleet mixes "RU11" (no dash) with "RU-6" (dash) —
-    # both must count as RU nodes.
-    ips = (
-        AggregatedIp(ip="1.1.1.1", node_names=("RU11",), last_seen=_T1),
-        AggregatedIp(ip="2.2.2.2", node_names=("RU11",), last_seen=_T1),
-        AggregatedIp(ip="3.3.3.3", node_names=("RU-6",), last_seen=_T1),
-        AggregatedIp(ip="4.4.4.4", node_names=("US-2",), last_seen=_T1),
-    )
-
-    count = _ru_node_group_count(ips, "ip", 24, {"RU"})
-
-    assert count == 3
 
 
 # ---- drop connections ----
@@ -774,16 +684,9 @@ async def test_resolve_payment_bounded_maps_by_telegram_id() -> None:
     assert result == {111: True, 222: False}
 
 
-async def test_enrich_hard_computes_ru_and_payment_and_criteria_matched() -> None:
-    config = make_config(antifraud_ru_node_prefixes=["RU"], antifraud_ru_node_ip_threshold=1)
-    flagged = make_flagged(
-        remnawave_id=1,
-        telegram_id=111,
-        ips=(
-            AggregatedIp(ip="1.1.1.1", node_names=("RU-1",), last_seen=_T1),
-            AggregatedIp(ip="2.2.2.2", node_names=("RU-2",), last_seen=_T1),
-        ),
-    )
+async def test_enrich_hard_computes_payment_and_criteria_matched() -> None:
+    config = make_config()
+    flagged = make_flagged(remnawave_id=1, telegram_id=111)
 
     import src.apps.antifraud.controllers.scheduler.tasks as tasks_mod
 
@@ -796,24 +699,22 @@ async def test_enrich_hard_computes_ru_and_payment_and_criteria_matched() -> Non
 
     assert len(result) == 1
     enriched = result[0]
-    assert enriched.ru_node_ip_count == 2
-    assert enriched.ru_node_threshold == 1
     assert enriched.no_active_payment is True
-    assert enriched.criteria_matched == 3  # is_hard + ru + payment
+    assert enriched.criteria_matched == 2  # is_hard + payment
 
 
 async def test_enrich_hard_skips_payment_check_without_telegram_id() -> None:
-    config = make_config(antifraud_ru_node_prefixes=["RU"], antifraud_ru_node_ip_threshold=99)
+    config = make_config()
     flagged = make_flagged(remnawave_id=1, telegram_id=None)
 
     result = await _enrich_hard_with_new_criteria([flagged], config, MagicMock())
 
     assert result[0].no_active_payment is None
-    assert result[0].criteria_matched == 1  # только is_hard, ru ниже порога, оплата не проверялась
+    assert result[0].criteria_matched == 1  # только is_hard, оплата не проверялась
 
 
 async def test_enrich_hard_criteria_matched_excludes_unknown_payment() -> None:
-    config = make_config(antifraud_ru_node_prefixes=["RU"], antifraud_ru_node_ip_threshold=99)
+    config = make_config()
     flagged = make_flagged(remnawave_id=1, telegram_id=111)
 
     import src.apps.antifraud.controllers.scheduler.tasks as tasks_mod

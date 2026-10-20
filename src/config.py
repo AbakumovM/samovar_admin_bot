@@ -83,15 +83,12 @@ class Config(BaseSettings):
     antifraud_asn_database_path: str = "./geoip/GeoLite2-ASN.mmdb"
     antifraud_maxmind_update_interval_hours: int = 168
     antifraud_auto_block_enabled: bool = False
-    antifraud_ru_node_prefixes: list[str] = ["RU"]
-    antifraud_ru_node_ip_threshold: int = 2
     samovarbot_base_url: str = ""
     samovarbot_internal_api_key: str = ""
 
     @field_validator(
         "antifraud_ignored_node_uuids",
         "antifraud_ip_whitelist",
-        "antifraud_ru_node_prefixes",
         mode="before",
     )
     @classmethod

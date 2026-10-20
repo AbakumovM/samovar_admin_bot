@@ -3,7 +3,6 @@ import dataclasses
 import html
 import ipaddress
 import logging
-import re
 from datetime import UTC, datetime
 from typing import Any
 
@@ -34,6 +33,9 @@ from src.infrastructure.samovarbot.client import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Много IP по всем нодам + нет активной оплаты.
+_TOTAL_CRITERIA = 2
 
 TELEGRAM_MESSAGE_LIMIT = 4096
 _DIGEST_SAFETY_MARGIN = 200
@@ -303,37 +305,6 @@ def _compute_group_count(
     return len(ip_map)
 
 
-_LEADING_LETTERS_RE = re.compile(r"^[A-Za-z]+")
-
-
-def _node_prefix(node_name: str) -> str:
-    """Extracts the region/provider prefix from a node name.
-
-    Node naming on the panel isn't uniformly "PREFIX-rest" — some nodes are
-    e.g. "RU-6" (dash before the number), others "RU11" (no dash at all).
-    Splitting on "-" alone missed the latter (returned "RU11" whole, never
-    matching a configured "RU" prefix), silently undercounting the RU-node
-    concentration criterion. Take the leading run of letters instead, which
-    handles both conventions the same way.
-    """
-    match = _LEADING_LETTERS_RE.match(node_name)
-    return match.group(0) if match else node_name
-
-
-def _ru_node_group_count(
-    ips: tuple[AggregatedIp, ...],
-    mode: GroupingMode,
-    subnet_prefix_v4: int,
-    ru_prefixes: set[str],
-) -> int:
-    ru_only = {
-        agg.ip: agg
-        for agg in ips
-        if any(_node_prefix(name) in ru_prefixes for name in agg.node_names)
-    }
-    return _compute_group_count(ru_only, mode, subnet_prefix_v4)
-
-
 def _resolve_and_filter_candidates(
     aggregated: dict[int, dict[str, AggregatedIp]],
     user_index: dict[int, dict[str, Any]],
@@ -447,13 +418,6 @@ def _format_ip_criterion_line(f: FlaggedUser) -> str:
     return f"  {icon} {stats} (лимит {f.hwid_device_limit}, порог {f.threshold}) — {status}"
 
 
-def _format_ru_criterion_line(f: FlaggedUser) -> str:
-    exceeded = f.ru_node_ip_count > f.ru_node_threshold
-    icon = "⚠️" if exceeded else "➖"
-    status = "превышен" if exceeded else "не превышен"
-    return f"  {icon} RU-ноды: {f.ru_node_ip_count} (порог {f.ru_node_threshold}) — {status}"
-
-
 def _format_payment_criterion_line(f: FlaggedUser) -> str:
     if f.no_active_payment is True:
         return "  ⚠️ Оплата: нет активной подписки"
@@ -466,7 +430,6 @@ def _format_criteria_breakdown(f: FlaggedUser) -> str:
     return "\n".join(
         [
             _format_ip_criterion_line(f),
-            _format_ru_criterion_line(f),
             _format_payment_criterion_line(f),
         ]
     )
@@ -509,7 +472,7 @@ def _format_digest(flagged: list[FlaggedUser], *, hard: bool) -> str:
         if hard:
             header_line = (
                 f"• <b>{html.escape(f.username)}</b> ({tg_str}) — "
-                f"критериев: {f.criteria_matched}/3\n"
+                f"критериев: {f.criteria_matched}/{_TOTAL_CRITERIA}\n"
             )
             stats_part = _format_criteria_breakdown(f)
         else:
@@ -538,7 +501,8 @@ def _format_auto_block_digest(blocked: list[FlaggedUser]) -> str:
         if len(f.ips) > _MAX_IPS_SHOWN_PER_USER:
             ip_lines += f"\n   +{len(f.ips) - _MAX_IPS_SHOWN_PER_USER} ещё"
         lines.append(
-            f"• <b>{html.escape(f.username)}</b> ({tg_str}) — критериев: {f.criteria_matched}/3\n"
+            f"• <b>{html.escape(f.username)}</b> ({tg_str}) — "
+            f"критериев: {f.criteria_matched}/{_TOTAL_CRITERIA}\n"
             f"{_format_criteria_breakdown(f)}\n{ip_lines}\n"
         )
     return "".join(lines)
@@ -642,43 +606,26 @@ async def _enrich_hard_with_new_criteria(
     config: Config,
     samovarbot_client: SamovarbotClient,
 ) -> list[FlaggedUser]:
-    """Добавляет критерии RU-нод и статуса оплаты уже-hard кандидатам.
+    """Добавляет критерий статуса оплаты уже-hard кандидатам.
 
-    criteria_matched стартует с 1 (is_hard — это критерий 2, всегда true
-    для любого из списка hard) и получает +1 за каждый дополнительный
-    сработавший критерий. Критерий, который не удалось оценить (нет
-    telegram_id, samovarbot недоступен), даёт 0, никогда не завышая счёт
-    на недостающих данных.
+    criteria_matched стартует с 1 (is_hard — много IP по всем нодам, всегда
+    true для любого из списка hard) и получает +1, если нет активной оплаты.
+    Если статус оплаты не удалось оценить (нет telegram_id, samovarbot
+    недоступен), критерий даёт 0, никогда не завышая счёт на недостающих данных.
     """
-    ru_prefixes = {p.upper() for p in config.antifraud_ru_node_prefixes}
-    interim: list[FlaggedUser] = []
-    for f in hard:
-        ru_count = _ru_node_group_count(
-            f.ips, f.grouping_mode, config.antifraud_subnet_prefix_v4, ru_prefixes
-        )
-        ru_tripped = ru_count > config.antifraud_ru_node_ip_threshold
-        interim.append(
-            dataclasses.replace(
-                f,
-                ru_node_ip_count=ru_count,
-                ru_node_threshold=config.antifraud_ru_node_ip_threshold,
-                criteria_matched=1 + (1 if ru_tripped else 0),
-            )
-        )
-
-    payment_targets = [f.telegram_id for f in interim if f.telegram_id is not None]
+    payment_targets = [f.telegram_id for f in hard if f.telegram_id is not None]
     payment_by_tg = await _resolve_payment_bounded(
         samovarbot_client, payment_targets, config.antifraud_user_resolve_concurrency
     )
 
     enriched: list[FlaggedUser] = []
-    for f in interim:
+    for f in hard:
         no_payment = payment_by_tg.get(f.telegram_id) if f.telegram_id is not None else None
         enriched.append(
             dataclasses.replace(
                 f,
                 no_active_payment=no_payment,
-                criteria_matched=f.criteria_matched + (1 if no_payment else 0),
+                criteria_matched=1 + (1 if no_payment else 0),
             )
         )
     return enriched
@@ -794,7 +741,7 @@ async def _run_antifraud_scan(
                         auto_block_ids = {
                             f.remnawave_id
                             for f in to_notify
-                            if f.criteria_matched == 3
+                            if f.criteria_matched == _TOTAL_CRITERIA
                             and config.antifraud_auto_block_enabled
                             and f.telegram_id is not None
                         }
@@ -805,7 +752,10 @@ async def _run_antifraud_scan(
                                 manual.append(f)
                                 continue
                             assert f.telegram_id is not None
-                            reason = f"antifraud: auto-block, {f.criteria_matched}/3 критериев"
+                            reason = (
+                                f"antifraud: auto-block, "
+                                f"{f.criteria_matched}/{_TOTAL_CRITERIA} критериев"
+                            )
                             blocked = await block_user(samovarbot_client, f.telegram_id, reason)
                             if blocked:
                                 await _drop_connections(raw_client, f.remnawave_id)
