@@ -1,13 +1,19 @@
 import html
+import logging
 from datetime import date, timedelta
 
+import httpx
 from aiogram import Router
 from aiogram.filters import Command
-from aiogram.types import Message
+from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 from dishka.integrations.aiogram import FromDishka, inject
 
 from src.apps.users.application.interfaces.view import UserTrafficView
 from src.apps.users.domain.models import UserTrafficDailyInfo
+from src.infrastructure.remnawave.connections import drop_user_connections
+from src.infrastructure.samovarbot.client import SamovarbotClient, block_user
+
+logger = logging.getLogger(__name__)
 
 router = Router()
 
@@ -108,3 +114,39 @@ async def cmd_user_traffic(
     total = sum(by_date.values())
     lines.append(f"\nИтого: {_fmt_bytes(total)}")
     await message.answer("\n".join(lines))
+
+
+@router.callback_query(lambda c: c.data == "traffic_noop")
+async def callback_traffic_noop(callback: CallbackQuery) -> None:
+    await callback.answer("Уже заблокирован ✅")
+
+
+@router.callback_query(lambda c: c.data is not None and c.data.startswith("traffic_block:"))
+@inject
+async def callback_traffic_block(
+    callback: CallbackQuery,
+    raw_client: FromDishka[httpx.AsyncClient],
+    samovarbot_client: FromDishka[SamovarbotClient],
+) -> None:
+    _, remnawave_id, telegram_id, gb = (callback.data or "").split(":")
+    reason = f"traffic: manual block (remnawave_id={remnawave_id}, 24h={gb} GB)"
+
+    blocked = await block_user(samovarbot_client, int(telegram_id), reason)
+    if not blocked:
+        await callback.answer("⚠️ Не удалось заблокировать", show_alert=True)
+        return
+    await drop_user_connections(raw_client, int(remnawave_id))
+
+    if isinstance(callback.message, Message) and callback.message.reply_markup is not None:
+        try:
+            await callback.message.edit_reply_markup(
+                reply_markup=InlineKeyboardMarkup(
+                    inline_keyboard=[
+                        [InlineKeyboardButton(text="✅ Заблокирован", callback_data="traffic_noop")]
+                    ]
+                )
+            )
+        except Exception as e:
+            logger.warning("Traffic: failed to update keyboard after block: %s", e)
+
+    await callback.answer("🚫 Пользователь заблокирован")
