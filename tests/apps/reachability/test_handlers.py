@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from src.apps.reachability.controllers.scheduler.pass_runner import PassResult, PointTracker
@@ -23,9 +23,9 @@ async def test_blocks_empty() -> None:
     view.list_not_ok = AsyncMock(return_value=[])
     view.last_checked_at = AsyncMock(return_value=None)
 
-    await _cmd_blocks(message, view)
+    await _cmd_blocks(message, view, MagicMock(reachability_interval_seconds=600), PointTracker())
 
-    message.answer.assert_awaited_once_with("✅ Заблокированных IP нет.")
+    message.answer.assert_awaited_once_with("✅ Заблокированных IP нет.\n\nПроверок ещё не было.")
 
 
 async def test_blocks_lists_blocked_ip_in_msk() -> None:
@@ -44,11 +44,23 @@ async def test_blocks_lists_blocked_ip_in_msk() -> None:
     )
     view.last_checked_at = AsyncMock(return_value=datetime(2026, 11, 16, 11, 30, tzinfo=UTC))
 
-    await _cmd_blocks(message, view)
+    tracker = PointTracker()
+    tracker.observe("TW2", False, 1)
+    with patch(
+        "src.apps.reachability.controllers.telegram.handlers._now",
+        return_value=datetime(2026, 11, 16, 11, 35, tzinfo=UTC),
+    ):
+        await _cmd_blocks(message, view, MagicMock(reachability_interval_seconds=600), tracker)
 
     message.answer.assert_awaited_once_with(
-        "🚫 157.22.177.33 — с 16.11 14:20 МСК\n\nПоследняя проверка: 16.11 14:30 МСК"
+        "🚫 157.22.177.33 — с 16.11 14:20 МСК\n"
+        "⏸ Точка проверки TW2 не работает\n\n"
+        "Последняя проверка: 16.11 14:30 МСК"
     )
+    # only rows checked within the last 3 intervals count as current
+    assert view.list_not_ok.await_args.args[0] == datetime(
+        2026, 11, 16, 11, 35, tzinfo=UTC
+    ) - timedelta(seconds=1800)
 
 
 async def test_blocks_check_disabled() -> None:
@@ -92,3 +104,22 @@ async def test_blocks_check_skipped() -> None:
     message.answer.return_value.edit_text.assert_awaited_once_with(
         "⚠️ Проверка пропущена: нет работающих точек"
     )
+
+
+async def test_blocks_check_when_pass_running() -> None:
+    message = _message()
+    tracker = PointTracker()
+    await tracker.lock.acquire()
+    with patch(
+        "src.apps.reachability.controllers.telegram.handlers.execute_pass", AsyncMock()
+    ) as run:
+        await _cmd_blocks_check(
+            message,
+            MagicMock(),
+            MagicMock(reachability_enabled=True),
+            MagicMock(),
+            MagicMock(),
+            tracker,
+        )
+    run.assert_not_awaited()
+    message.answer.assert_awaited_once_with("⏳ Проверка уже идёт, результат придёт сводкой.")

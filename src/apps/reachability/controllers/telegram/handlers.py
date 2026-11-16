@@ -1,5 +1,5 @@
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 
 import httpx
 from aiogram import Bot, Router
@@ -21,25 +21,38 @@ _MSK = timezone(timedelta(hours=3))
 _ICONS = {"blocked": "🚫", "partial": "⚠️"}
 
 
+def _now() -> datetime:
+    return datetime.now(UTC)
+
+
 def _fmt_msk(moment: datetime) -> str:
     return moment.astimezone(_MSK).strftime("%d.%m %H:%M МСК")
 
 
 @router.message(Command("blocks"))
 @inject
-async def cmd_blocks(message: Message, view: FromDishka[ReachabilityView]) -> None:
-    rows = await view.list_not_ok()
-    if not rows:
-        await message.answer("✅ Заблокированных IP нет.")
-        return
+async def cmd_blocks(
+    message: Message,
+    view: FromDishka[ReachabilityView],
+    config: FromDishka[Config],
+    tracker: FromDishka[PointTracker],
+) -> None:
+    fresh_since = _now() - timedelta(seconds=3 * config.reachability_interval_seconds)
+    rows = await view.list_not_ok(fresh_since)
     lines = []
     for row in rows:
         since = f" — с {_fmt_msk(row.changed_at)}" if row.changed_at else ""
         lines.append(f"{_ICONS.get(row.status, '❔')} {row.ip}{since}")
+    if not rows:
+        lines.append("✅ Заблокированных IP нет.")
+    lines.extend(f"⏸ Точка проверки {name} не работает" for name in tracker.down_points())
     last_checked = await view.last_checked_at()
-    if last_checked is not None:
-        lines.append(f"\nПоследняя проверка: {_fmt_msk(last_checked)}")
-    await message.answer("\n".join(lines))
+    footer = (
+        f"Последняя проверка: {_fmt_msk(last_checked)}"
+        if last_checked is not None
+        else "Проверок ещё не было."
+    )
+    await message.answer("\n".join(lines) + "\n\n" + footer)
 
 
 @router.message(Command("blocks_check"))
@@ -54,6 +67,9 @@ async def cmd_blocks_check(
 ) -> None:
     if not config.reachability_enabled:
         await message.answer("Проверка блокировок выключена (REACHABILITY_ENABLED=false).")
+        return
+    if tracker.lock.locked():
+        await message.answer("⏳ Проверка уже идёт, результат придёт сводкой.")
         return
     status = await message.answer("⏳ Проверяю…")
     try:

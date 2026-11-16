@@ -132,9 +132,21 @@ IP пропускается. Новый статус принимается по
    `probe-secrets/` монтируется в контейнер как `/run/secrets` (только чтение).
 2. На каждой точке: `mkdir -p /opt/samovar-probe`, скопировать `probe.py`, `chmod 755`, в
    `/root/.ssh/authorized_keys` строка
-   `command="/usr/bin/python3 /opt/samovar-probe/probe.py",no-pty,no-port-forwarding,no-agent-forwarding,no-X11-forwarding <pubkey>`.
+   `restrict,from="84.21.172.217",command="/usr/bin/python3 /opt/samovar-probe/probe.py" <pubkey>`
+   (`from=` — ключ работает только с прод-сервера админ-бота; при переезде бота — обновить).
+   `probe.py` принимает только глобальные IP (не localhost/LAN) и ≤200 целей.
 3. Проверка: `echo '[{"ip":"1.1.1.1","port":443,"sni":"one.one.one.one"}]' | ssh -i probe-secrets/probe_key root@<точка>` → JSON с `ok`.
 4. Миграция, `REACHABILITY_ENABLED=true`, перезапуск, `/blocks_check`.
+
+Особенности:
+- Переустановили точку → сменился её host key → «не отвечает по SSH», пока не обновить
+  `probe-secrets/probe_known_hosts` (`ssh-keyscan`).
+- Проверка — TCP + TLS-рукопожатие. Режим ТСПУ «пропускает рукопожатие, замораживает после
+  ~16–20 КБ» она не ловит: IP будет `ok`, а у пользователей «подключено, но не работает».
+- Проход падает 3 раза подряд → «⚠️ Проверка блокировок падает с ошибкой…»; ручная
+  `/blocks_check` во время планового прохода не запускается («Проверка уже идёт»).
+- `/blocks` показывает только IP, проверенные за последние 3 интервала (снятые с плиток IP
+  пропадают из списка сами).
 
 ## Антифрод (шеринг подписки по конкурентным IP)
 

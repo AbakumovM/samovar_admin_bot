@@ -1,4 +1,5 @@
 import asyncio
+import html
 import logging
 import random
 from datetime import UTC, datetime
@@ -11,6 +12,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 from src.apps.reachability.adapters.gateway import PostgresReachabilityGateway
 from src.apps.reachability.adapters.view import PostgresReachabilityView
 from src.apps.reachability.controllers.scheduler.pass_runner import (
+    PASS_KEY,
     PassResult,
     PointTracker,
     run_pass,
@@ -53,6 +55,18 @@ async def _fetch(raw_client: httpx.AsyncClient, path: str) -> list[dict[str, Any
     return list(data)
 
 
+_PASS_FAILURES_TO_ALERT = 3
+
+
+async def _send(bot: Bot, admin_ids: list[int], messages: list[str]) -> None:
+    for text in messages:
+        for admin_id in admin_ids:
+            try:
+                await bot.send_message(admin_id, text)
+            except Exception as e:
+                logger.error("Failed to send reachability alert to admin %s: %s", admin_id, e)
+
+
 async def execute_pass(
     config: Config,
     session_factory: async_sessionmaker,  # type: ignore[type-arg]
@@ -85,7 +99,7 @@ async def execute_pass(
     async def run_outside(payload: list[dict[str, Any]]) -> list[dict[str, Any]]:
         return await run_local_probe(payload, config.reachability_timeout_seconds)
 
-    async with session_factory() as session:
+    async with tracker.lock, session_factory() as session:
         async with session.begin():
             store = _SessionStateStore(
                 PostgresReachabilityView(session=session),
@@ -107,12 +121,7 @@ async def execute_pass(
                 now=datetime.now(UTC),
             )
 
-    for text in result.messages:
-        for admin_id in config.admin_ids:
-            try:
-                await bot.send_message(admin_id, text)
-            except Exception as e:
-                logger.error("Failed to send reachability alert to admin %s: %s", admin_id, e)
+    await _send(bot, config.admin_ids, result.messages)
     logger.info(
         "Reachability pass: checked=%d not_ok=%d skipped=%s messages=%d",
         result.checked,
@@ -121,6 +130,29 @@ async def execute_pass(
         len(result.messages),
     )
     return result
+
+
+async def run_scheduled_pass(
+    config: Config,
+    session_factory: async_sessionmaker,  # type: ignore[type-arg]
+    raw_client: httpx.AsyncClient,
+    bot: Bot,
+    tracker: PointTracker,
+) -> list[str]:
+    """One scheduled pass; returns alerts about the checker itself failing/recovering."""
+    try:
+        await execute_pass(config, session_factory, raw_client, bot, tracker)
+    except Exception as e:
+        logger.error("Reachability pass error: %r", e)
+        if tracker.observe(PASS_KEY, False, _PASS_FAILURES_TO_ALERT) == "down":
+            return [
+                "⚠️ Проверка блокировок падает с ошибкой "
+                f"{_PASS_FAILURES_TO_ALERT} раза подряд: {html.escape(repr(e), quote=False)}"
+            ]
+        return []
+    if tracker.observe(PASS_KEY, True, _PASS_FAILURES_TO_ALERT) == "up":
+        return ["✅ Проверка блокировок снова работает"]
+    return []
 
 
 async def reachability_task(
@@ -140,10 +172,11 @@ async def reachability_task(
     )
     await asyncio.sleep(20)  # Let bot start before the first pass
     while True:
-        try:
-            await execute_pass(config, session_factory, raw_client, bot, tracker)
-        except Exception as e:
-            logger.error("Reachability pass error: %r", e)
+        await _send(
+            bot,
+            config.admin_ids,
+            await run_scheduled_pass(config, session_factory, raw_client, bot, tracker),
+        )
         jitter = random.uniform(
             -config.reachability_jitter_seconds, config.reachability_jitter_seconds
         )

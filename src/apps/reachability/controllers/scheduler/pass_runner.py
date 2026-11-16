@@ -41,11 +41,22 @@ class _PointHealth:
     alerted: bool = False
 
 
+PASS_KEY = "__pass__"  # tracks consecutive failures of the whole pass
+
+
 @dataclass
 class PointTracker:
-    """In-memory health history of probe points (resets on restart)."""
+    """In-memory health history of probe points (resets on restart).
+
+    `lock` serializes passes: the scheduled loop and /blocks_check share this
+    singleton, and two concurrent passes would double-confirm statuses.
+    """
 
     _points: dict[str, _PointHealth] = field(default_factory=dict)
+    lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+
+    def down_points(self) -> list[str]:
+        return [name for name, h in self._points.items() if h.alerted and name != PASS_KEY]
 
     def observe(
         self, name: str, healthy: bool, confirm_passes: int

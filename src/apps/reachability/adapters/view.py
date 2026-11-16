@@ -29,10 +29,14 @@ class PostgresReachabilityView:
             for m in result.scalars().all()
         }
 
-    async def list_not_ok(self) -> list[IpStateRow]:
+    async def list_not_ok(self, checked_since: datetime) -> list[IpStateRow]:
         result = await self._session.execute(
             select(IpReachabilityStateModel)
-            .where(IpReachabilityStateModel.status.in_(["partial", "blocked"]))
+            .where(
+                IpReachabilityStateModel.status.in_(["partial", "blocked"]),
+                # IPs no longer on any tile stop being checked; don't report them forever
+                IpReachabilityStateModel.checked_at >= checked_since,
+            )
             .order_by(IpReachabilityStateModel.changed_at.desc())
         )
         return [
