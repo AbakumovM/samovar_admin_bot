@@ -42,6 +42,15 @@ def _compute_delta(current: int, previous: int) -> int | None:
     return delta
 
 
+def _is_fresh_snapshot(recorded_at: datetime, now: datetime, interval_seconds: int) -> bool:
+    """False when the previous snapshot is older than two check intervals.
+
+    After bot/panel downtime the delta covers many hours; writing it as one
+    hourly record would inflate the rolling 24h sum and cause false alerts.
+    """
+    return now - recorded_at <= timedelta(seconds=2 * interval_seconds)
+
+
 def _order_and_limit(
     alerts: list[ThresholdAlert], critical_threshold_gb: int, limit: int
 ) -> list[ThresholdAlert]:
@@ -128,6 +137,10 @@ async def _run_traffic_check(
                         delta_bytes=delta,
                     )
                 )
+                if not _is_fresh_snapshot(
+                    snapshot.recorded_at, now, config.traffic_check_interval_seconds
+                ):
+                    continue  # Delta spans downtime — keep it out of the rolling 24h window
                 await gateway.add_hourly_traffic(
                     AddHourlyTraffic(user_uuid=user_uuid, recorded_at=now, delta_bytes=delta)
                 )
