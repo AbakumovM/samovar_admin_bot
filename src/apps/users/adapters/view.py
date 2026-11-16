@@ -1,7 +1,9 @@
 from datetime import date, datetime, timedelta
 
-from sqlalchemy import func, select
+from sqlalchemy import String, any_, bindparam, func, select
+from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.sql.elements import BindParameter
 
 from src.apps.users.adapters.orm import (
     UserTrafficDailyModel,
@@ -10,6 +12,15 @@ from src.apps.users.adapters.orm import (
     UserTrafficThresholdAlertModel,
 )
 from src.apps.users.domain.models import UserTrafficDailyInfo, UserTrafficSnapshotInfo
+
+
+def _uuid_array(user_uuids: list[str]) -> BindParameter[list[str]]:
+    # One array bind instead of an IN-list: asyncpg caps a query at 32767 params.
+    return bindparam(
+        "user_uuids",
+        user_uuids,
+        type_=ARRAY(String),  # type: ignore[arg-type]  # stubs type ARRAY by item, not list
+    )
 
 
 def _to_snapshot_info(m: UserTrafficLastSnapshotModel) -> UserTrafficSnapshotInfo:
@@ -113,7 +124,7 @@ class PostgresUserTrafficView:
                 func.sum(UserTrafficHourlyModel.delta_bytes).label("total"),
             )
             .where(
-                UserTrafficHourlyModel.user_uuid.in_(user_uuids),
+                UserTrafficHourlyModel.user_uuid == any_(_uuid_array(user_uuids)),
                 UserTrafficHourlyModel.recorded_at > since,
             )
             .group_by(UserTrafficHourlyModel.user_uuid)
@@ -130,7 +141,7 @@ class PostgresUserTrafficView:
                 UserTrafficThresholdAlertModel.user_uuid,
                 UserTrafficThresholdAlertModel.threshold_gb,
             ).where(
-                UserTrafficThresholdAlertModel.user_uuid.in_(user_uuids),
+                UserTrafficThresholdAlertModel.user_uuid == any_(_uuid_array(user_uuids)),
                 UserTrafficThresholdAlertModel.alerted_at > since,
             )
         )
