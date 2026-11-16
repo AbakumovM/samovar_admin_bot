@@ -57,6 +57,8 @@ class Config(BaseSettings):
     traffic_check_interval_seconds: int = 3600
     traffic_anomaly_threshold_gb: float = 30.0
     traffic_anomaly_multiplier: float = 2.0
+    traffic_alert_thresholds_gb: list[int] = [30, 50, 100, 150]
+    traffic_critical_threshold_gb: int = 150
     billing_alert_days_before: int = 3
     billing_check_hour_utc: int = 17
     antifraud_enabled: bool = False
