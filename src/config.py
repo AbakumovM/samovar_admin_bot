@@ -1,6 +1,6 @@
 import json
 
-from pydantic import field_validator
+from pydantic import BaseModel, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -29,6 +29,11 @@ def _parse_int_list(v: object) -> list[int]:
     if v is None:
         return []
     return list(v)  # type: ignore[arg-type]
+
+
+class ReachabilityPointConfig(BaseModel):
+    name: str
+    host: str
 
 
 class Config(BaseSettings):
@@ -86,6 +91,36 @@ class Config(BaseSettings):
     antifraud_auto_block_enabled: bool = False
     samovarbot_base_url: str = ""
     samovarbot_internal_api_key: str = ""
+    reachability_enabled: bool = False
+    reachability_interval_seconds: int = 600
+    reachability_jitter_seconds: int = 120
+    reachability_confirm_passes: int = 2
+    reachability_timeout_seconds: float = 5.0
+    reachability_point_timeout_seconds: float = 30.0
+    reachability_control_targets: list[str] = [
+        "github.com",
+        "www.microsoft.com",
+        "www.apple.com",
+        "www.cloudflare.com",
+    ]
+    reachability_control_min_ok_ratio: float = 0.5
+    reachability_host_tags: list[str] = [
+        "SELF",
+        "GEMINI",
+        "GAME",
+        "SMART",
+        "SMART_MAIN",
+        "EXIT",
+        "SERVICE",
+        "TELEGRAM",
+    ]
+    reachability_points: list[ReachabilityPointConfig] = [
+        ReachabilityPointConfig(name="RU-10", host="193.233.245.212"),
+        ReachabilityPointConfig(name="TW2", host="141.133.187.45"),
+    ]
+    reachability_ssh_key_path: str = "/run/secrets/probe_key"
+    reachability_ssh_known_hosts_path: str = "/run/secrets/probe_known_hosts"
+    reachability_ssh_user: str = "root"
 
     @field_validator(
         "antifraud_ignored_node_uuids",
