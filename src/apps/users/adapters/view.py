@@ -78,15 +78,6 @@ class PostgresUserTrafficView:
         )
         return [_to_daily_info(m) for m in result.scalars().all()]
 
-    async def get_today_unalerted(self) -> list[UserTrafficDailyInfo]:
-        result = await self._session.execute(
-            select(UserTrafficDailyModel).where(
-                UserTrafficDailyModel.date == date.today(),
-                UserTrafficDailyModel.anomaly_alerted.is_(False),
-            )
-        )
-        return [_to_daily_info(m) for m in result.scalars().all()]
-
     async def get_avg_daily_7d(self, user_uuid: str) -> float:
         cutoff = date.today() - timedelta(days=7)
         result = await self._session.execute(

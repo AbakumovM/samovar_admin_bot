@@ -55,7 +55,6 @@ class Config(BaseSettings):
     escalation_max_attempts: int = 3
     daily_report_hour_utc: int = 17  # 20:00 MSK
     traffic_check_interval_seconds: int = 3600
-    traffic_anomaly_threshold_gb: float = 30.0
     traffic_anomaly_multiplier: float = 2.0
     traffic_alert_thresholds_gb: list[int] = [30, 50, 100, 150]
     traffic_critical_threshold_gb: int = 150

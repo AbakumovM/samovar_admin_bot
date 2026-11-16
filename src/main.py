@@ -171,7 +171,7 @@ async def main() -> None:
         monitoring_task(config, session_factory, sdk, raw_client, notify),
         fast_monitoring_task(config, session_factory, sdk, raw_client, notify),
         daily_report_task(config, session_factory, notify),
-        traffic_monitoring_task(config, session_factory, raw_client, notify),
+        traffic_monitoring_task(config, session_factory, raw_client, bot),
         billing_alert_task(config, sdk, bot),
         antifraud_scan_task(
             config,

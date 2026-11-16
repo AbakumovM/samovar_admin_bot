@@ -1,17 +1,26 @@
 import asyncio
-import html
 import logging
-from collections.abc import Callable, Coroutine
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import httpx
+from aiogram import Bot
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from src.apps.users.adapters.gateway import PostgresUserTrafficGateway
 from src.apps.users.adapters.view import PostgresUserTrafficView
+from src.apps.users.controllers.scheduler.alerts import (
+    ThresholdAlert,
+    format_threshold_alert,
+    is_spike,
+    make_block_keyboard,
+    pick_threshold,
+)
 from src.apps.users.domain.commands import (
+    AddHourlyTraffic,
     MarkAnomalyAlerted,
+    MarkThresholdsAlerted,
+    PurgeTrafficHistory,
     UpdateLastSnapshot,
     UpsertDailyTraffic,
 )
@@ -20,7 +29,9 @@ from src.infrastructure.remnawave.pagination import fetch_all_users_stream
 
 logger = logging.getLogger(__name__)
 
-NotifyFn = Callable[[str], Coroutine[Any, Any, None]]
+_WINDOW = timedelta(hours=24)
+_HISTORY_RETENTION = timedelta(hours=25)
+_ALERT_LIMIT = 10  # Prevent Telegram flood if thresholds misconfigured; critical alerts bypass it
 
 
 def _compute_delta(current: int, previous: int) -> int | None:
@@ -31,29 +42,15 @@ def _compute_delta(current: int, previous: int) -> int | None:
     return delta
 
 
-def _check_anomaly(
-    bytes_today: int,
-    avg_daily_bytes: float,
-    threshold_bytes: int,
-    multiplier: float,
-) -> tuple[bool, bool]:
-    """Return (is_high, is_spike). Independent checks — either triggers an alert.
-
-    is_high: today > threshold_bytes (absolute — catches stable heavy users)
-    is_spike: today > multiplier * avg (relative — catches sudden surges)
-              Only fires when avg history exists (avg > 0).
-    """
-    is_high = bytes_today > threshold_bytes
-    is_spike = avg_daily_bytes > 0 and bytes_today > multiplier * avg_daily_bytes
-    return is_high, is_spike
-
-
-def _fmt_bytes(b: int) -> str:
-    gb = b / 1024**3
-    if gb >= 1:
-        return f"{gb:.1f} GB"
-    mb = b / 1024**2
-    return f"{mb:.1f} MB"
+def _order_and_limit(
+    alerts: list[ThresholdAlert], critical_threshold_gb: int, limit: int
+) -> list[ThresholdAlert]:
+    """All critical alerts first, then at most `limit` regular ones, heaviest first."""
+    critical = [a for a in alerts if a.threshold_gb >= critical_threshold_gb]
+    regular = [a for a in alerts if a.threshold_gb < critical_threshold_gb]
+    critical.sort(key=lambda a: a.total_bytes, reverse=True)
+    regular.sort(key=lambda a: a.total_bytes, reverse=True)
+    return critical + regular[:limit]
 
 
 async def _fetch_all_users(raw_client: httpx.AsyncClient) -> list[dict[str, Any]]:
@@ -65,20 +62,31 @@ async def _fetch_all_users(raw_client: httpx.AsyncClient) -> list[dict[str, Any]
     ]
 
 
+async def _send_to_admins(bot: Bot, admin_ids: list[int], alert: ThresholdAlert, text: str) -> None:
+    keyboard = make_block_keyboard(alert.user_uuid, alert.telegram_id, alert.total_bytes)
+    for admin_id in admin_ids:
+        try:
+            await bot.send_message(admin_id, text, reply_markup=keyboard)
+        except Exception as e:
+            logger.error("Failed to send traffic alert to admin %s: %s", admin_id, e)
+
+
 async def _run_traffic_check(
     config: Config,
     session_factory: async_sessionmaker,  # type: ignore[type-arg]
     raw_client: httpx.AsyncClient,
-    notify: NotifyFn,
+    bot: Bot,
 ) -> None:
     now = datetime.now(UTC)
     today = now.date()  # UTC date — requires server/container to run in UTC (Docker default)
-    threshold_bytes = int(config.traffic_anomaly_threshold_gb * 1024**3)
 
     users = await _fetch_all_users(raw_client)
     logger.info("Traffic check: %d active users to process", len(users))
 
-    # Transaction 1: process user snapshots and daily traffic
+    # uuid -> (username, telegram_id) for users who consumed traffic this tick
+    active: dict[str, tuple[str, int]] = {}
+
+    # Transaction 1: process user snapshots, daily and hourly traffic
     async with session_factory() as session:
         async with session.begin():
             gateway = PostgresUserTrafficGateway(session=session)
@@ -120,61 +128,86 @@ async def _run_traffic_check(
                         delta_bytes=delta,
                     )
                 )
+                await gateway.add_hourly_traffic(
+                    AddHourlyTraffic(user_uuid=user_uuid, recorded_at=now, delta_bytes=delta)
+                )
+                active[user_uuid] = (username, int(user["telegramId"]))
 
-    # Transaction 2: anomaly detection and alerts
+            await gateway.purge_traffic_history(
+                PurgeTrafficHistory(before=now - _HISTORY_RETENTION)
+            )
+
+    # Transaction 2: threshold detection over the rolling 24h window
     async with session_factory() as session:
         async with session.begin():
             gateway = PostgresUserTrafficGateway(session=session)
             view = PostgresUserTrafficView(session=session)
 
-            candidates = await view.get_today_unalerted()
-            anomaly_count = 0
-            alert_limit = 10  # Prevent Telegram flood if threshold misconfigured
-            for record in candidates:
-                if anomaly_count >= alert_limit:
-                    logger.warning(
-                        "Traffic anomaly alert limit reached (%d), suppressing further alerts",
-                        alert_limit,
-                    )
-                    break
-                avg_bytes = await view.get_avg_daily_7d(record.user_uuid)
-                is_high, is_spike = _check_anomaly(
-                    bytes_today=record.bytes_consumed,
-                    avg_daily_bytes=avg_bytes,
-                    threshold_bytes=threshold_bytes,
-                    multiplier=config.traffic_anomaly_multiplier,
-                )
-                if not is_high:
-                    continue
-                await gateway.mark_anomaly_alerted(
-                    MarkAnomalyAlerted(user_uuid=record.user_uuid, date=today)
-                )
-                safe_username = html.escape(record.username)
-                labels: list[str] = []
-                if is_high:
-                    labels.append(f"Высокое потребление (>{_fmt_bytes(threshold_bytes)}/день)")
-                if is_spike:
-                    multiplier_actual = record.bytes_consumed / avg_bytes
-                    labels.append(
-                        f"Резкий скачок ×{multiplier_actual:.1f} "
-                        f"(обычно ~{_fmt_bytes(int(avg_bytes))}/день)"
-                    )
-                await notify(
-                    f"⚠️ Аномальный трафик: <b>{safe_username}</b>\n"
-                    f"Сегодня: {_fmt_bytes(record.bytes_consumed)}\n"
-                    + "\n".join(f"• {label}" for label in labels)
-                )
-                anomaly_count += 1
+            since = now - _WINDOW
+            totals = await view.get_traffic_since(list(active), since)
+            alerted = await view.get_alerted_thresholds_since(list(active), since)
 
-            if anomaly_count:
-                logger.info("Traffic check: %d anomalies detected", anomaly_count)
+            candidates: list[ThresholdAlert] = []
+            for user_uuid, total in totals.items():
+                threshold = pick_threshold(
+                    total, config.traffic_alert_thresholds_gb, alerted.get(user_uuid, set())
+                )
+                if threshold is None:
+                    continue
+                username, telegram_id = active[user_uuid]
+                candidates.append(
+                    ThresholdAlert(
+                        user_uuid=user_uuid,
+                        username=username,
+                        telegram_id=telegram_id,
+                        total_bytes=total,
+                        threshold_gb=threshold,
+                    )
+                )
+
+            selected = _order_and_limit(
+                candidates, config.traffic_critical_threshold_gb, _ALERT_LIMIT
+            )
+            if len(selected) < len(candidates):
+                logger.warning(
+                    "Traffic alert limit reached (%d), suppressing %d alerts until next check",
+                    _ALERT_LIMIT,
+                    len(candidates) - len(selected),
+                )
+
+            for alert in selected:
+                avg_bytes = await view.get_avg_daily_7d(alert.user_uuid)
+                await gateway.mark_thresholds_alerted(
+                    MarkThresholdsAlerted(
+                        user_uuid=alert.user_uuid,
+                        thresholds_gb=[
+                            t for t in config.traffic_alert_thresholds_gb if t <= alert.threshold_gb
+                        ],
+                        alerted_at=now,
+                    )
+                )
+                await gateway.mark_anomaly_alerted(
+                    MarkAnomalyAlerted(user_uuid=alert.user_uuid, date=today)
+                )
+                text = format_threshold_alert(
+                    username=alert.username,
+                    total_bytes=alert.total_bytes,
+                    threshold_gb=alert.threshold_gb,
+                    critical_threshold_gb=config.traffic_critical_threshold_gb,
+                    avg_daily_bytes=avg_bytes,
+                    spike=is_spike(alert.total_bytes, avg_bytes, config.traffic_anomaly_multiplier),
+                )
+                await _send_to_admins(bot, config.admin_ids, alert, text)
+
+            if selected:
+                logger.info("Traffic check: %d threshold alerts sent", len(selected))
 
 
 async def traffic_monitoring_task(
     config: Config,
     session_factory: async_sessionmaker,  # type: ignore[type-arg]
     raw_client: httpx.AsyncClient,
-    notify: NotifyFn,
+    bot: Bot,
 ) -> None:
     logger.info(
         "Traffic monitoring starting, first check in 15s, interval=%ds",
@@ -183,7 +216,7 @@ async def traffic_monitoring_task(
     await asyncio.sleep(15)  # Let bot start before first heavy fetch
     while True:
         try:
-            await _run_traffic_check(config, session_factory, raw_client, notify)
+            await _run_traffic_check(config, session_factory, raw_client, bot)
         except Exception as e:
             logger.error("Traffic monitoring error: %s", e)
         await asyncio.sleep(config.traffic_check_interval_seconds)
