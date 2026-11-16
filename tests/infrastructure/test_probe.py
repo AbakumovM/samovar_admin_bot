@@ -136,3 +136,22 @@ def test_probe_targets_keeps_order(plain_tcp_server: int) -> None:
     )
     assert [r["port"] for r in results] == [refused_port, plain_tcp_server]
     assert [r["result"] for r in results] == ["refused", "tls_fail"]
+
+
+def test_probe_invalid_sni_is_tls_fail(tls_server: int) -> None:
+    result = probe.probe_one("127.0.0.1", tls_server, "a..b", 2.0)
+    assert result["result"] == "tls_fail"
+
+
+@pytest.mark.parametrize("ip", ["127.0.0.1", "10.0.0.1", "192.168.1.1", "::1", "169.254.1.1"])
+def test_validate_rejects_non_global(ip: str) -> None:
+    with pytest.raises(ValueError):
+        probe.validate_targets([{"ip": ip, "port": 443, "sni": None}], allow_local=False)
+
+
+def test_main_rejects_oversized_input(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr("sys.stdin", io.StringIO("[" + " " * 70_000 + "]"))
+    assert probe.main() == 2
+    assert "error" in json.loads(capsys.readouterr().out)

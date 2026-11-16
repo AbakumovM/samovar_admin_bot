@@ -50,7 +50,7 @@ async def run_remote_probe(
 
     try:
         completed = await asyncio.wait_for(run(), timeout)
-    except (TimeoutError, OSError, asyncssh.Error) as e:
+    except Exception as e:  # incl. KeyImportError (a ValueError) for a bad/locked key file
         logger.warning("Probe point %s unreachable: %r", point.name, e)
         return None
 

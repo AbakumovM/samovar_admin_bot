@@ -76,3 +76,13 @@ async def test_hanging_run_times_out() -> None:
 
     with _patch_connect(AsyncMock(side_effect=hang)):
         assert await _call(timeout=0.05) is None
+
+
+async def test_key_import_error_is_none() -> None:
+    import asyncssh
+
+    def bad_key(*args: Any, **kwargs: Any) -> Any:
+        raise asyncssh.KeyImportError("bad key")
+
+    with patch("src.infrastructure.reachability.ssh_runner.asyncssh.connect", bad_key):
+        assert await _call() is None

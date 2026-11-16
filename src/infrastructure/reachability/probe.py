@@ -20,10 +20,11 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 MAX_TARGETS = 200
+MAX_INPUT_BYTES = 64 * 1024
 DEFAULT_TIMEOUT = 5.0
 
 
-def validate_targets(raw: object) -> list[dict[str, Any]]:
+def validate_targets(raw: object, allow_local: bool = False) -> list[dict[str, Any]]:
     if not isinstance(raw, list):
         raise ValueError("targets must be a list")
     if len(raw) > MAX_TARGETS:
@@ -37,7 +38,10 @@ def validate_targets(raw: object) -> list[dict[str, Any]]:
         sni = item.get("sni")
         if not isinstance(ip, str):
             raise ValueError("ip must be a string")
-        ipaddress.ip_address(ip)  # raises ValueError for hostnames
+        address = ipaddress.ip_address(ip)  # raises ValueError for hostnames
+        if not allow_local and not address.is_global:
+            # A leaked key must not turn into a scanner of the point's own/LAN ports.
+            raise ValueError(f"non-global address: {ip}")
         if isinstance(port, bool) or not isinstance(port, int) or not 1 <= port <= 65535:
             raise ValueError(f"bad port: {port!r}")
         if sni is not None and not isinstance(sni, str):
@@ -74,7 +78,7 @@ def probe_one(ip: str, port: int, sni: str | None, timeout: float) -> dict[str, 
         return done("ok")
     except TimeoutError:
         return done("timeout")
-    except (OSError, ssl.SSLError):
+    except (OSError, ssl.SSLError, ValueError):  # ValueError: SNI rejected by the idna codec
         return done("tls_fail")
     finally:
         sock.close()
@@ -90,8 +94,11 @@ def probe_targets(
 
 
 def main() -> int:
+    raw = sys.stdin.read(MAX_INPUT_BYTES + 1)
     try:
-        targets = validate_targets(json.loads(sys.stdin.read()))
+        if len(raw) > MAX_INPUT_BYTES:
+            raise ValueError("input too large")
+        targets = validate_targets(json.loads(raw))
     except ValueError as e:  # json.JSONDecodeError is a ValueError
         print(json.dumps({"error": str(e)}))
         return 2
