@@ -23,6 +23,12 @@ def upgrade() -> None:
         'ip_reachability_state',
         sa.Column('notified_at', sa.DateTime(timezone=True), nullable=True),
     )
+    # Already-blocked IPs were alerted when their status changed; don't re-remind right
+    # after deploy.
+    op.execute(
+        "UPDATE ip_reachability_state SET notified_at = changed_at "
+        "WHERE status IN ('partial', 'blocked')"
+    )
 
 
 def downgrade() -> None:

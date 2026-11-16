@@ -154,3 +154,20 @@ def test_reminder_without_since_and_hosters() -> None:
     target = IpTarget("1.1.1.1", 443, None, ("t (a)",), (), ())
     text = format_reminder([ReminderItem(target, "blocked", None)])[0]
     assert text == "🔁 Всё ещё заблокированы\n\n🚫 1.1.1.1\nПлитки: t (a)"
+
+
+def test_hoster_link_only_for_http_urls() -> None:
+    target = IpTarget(
+        "1.1.1.1",
+        443,
+        None,
+        ("t (a)",),
+        (),
+        (
+            ("bad", "javascript:alert(1)"),
+            ("bare", "my.host.su"),
+            ("good", "https://x.su/a?b=1&c=2"),
+        ),
+    )
+    text = format_reminder([ReminderItem(target, "blocked", None)])[0]
+    assert text.endswith('Хостер: bad, bare, <a href="https://x.su/a?b=1&amp;c=2">good</a>')

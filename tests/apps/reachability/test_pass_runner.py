@@ -212,3 +212,10 @@ async def test_ok_ip_never_reminded() -> None:
     store = MemoryStore({IP: IpState(IP, "ok", None, 0, None, NOW - timedelta(days=2))})
     result = await _pass(store, PointTracker(), ALL_OK)
     assert result.messages == []
+
+
+async def test_no_reminder_while_status_is_changing() -> None:
+    store = MemoryStore({IP: IpState(IP, "blocked", None, 0, None, NOW - timedelta(hours=7))})
+    result = await _pass(store, PointTracker(), ALL_OK)
+    assert result.messages == []
+    assert store.states[IP].notified_at == NOW - timedelta(hours=7)

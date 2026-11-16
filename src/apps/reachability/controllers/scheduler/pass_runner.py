@@ -172,8 +172,10 @@ async def run_pass(
                 changes.append(
                     IpChange(target, transition.previous, transition.current, last_results)
                 )
-        elif state.status in ("partial", "blocked") and (
-            state.notified_at is None or now - state.notified_at >= reminder_after
+        elif (
+            state.status in ("partial", "blocked")
+            and state.pending_status is None  # don't remind while the status is changing
+            and (state.notified_at is None or now - state.notified_at >= reminder_after)
         ):
             reminders.append(ReminderItem(target, state.status, state.changed_at))
             state = replace(state, notified_at=now)

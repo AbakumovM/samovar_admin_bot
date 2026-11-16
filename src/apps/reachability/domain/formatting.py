@@ -1,6 +1,7 @@
 import html
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from urllib.parse import urlparse
 
 from src.apps.reachability.domain.targets import IpTarget
 
@@ -37,11 +38,19 @@ def fmt_msk(moment: datetime) -> str:
     return moment.astimezone(_MSK).strftime("%d.%m %H:%M МСК")
 
 
+def _is_web_url(url: str) -> bool:
+    # Telegram rejects the whole message on a bad href; link only plain web URLs.
+    parsed = urlparse(url)
+    return parsed.scheme in ("http", "https") and bool(parsed.netloc) and " " not in url
+
+
 def _hoster_line(target: IpTarget) -> list[str]:
     if not target.hosters:
         return []
     links = [
-        f'<a href="{html.escape(url)}">{html.escape(name)}</a>' if url else html.escape(name)
+        f'<a href="{html.escape(url)}">{html.escape(name)}</a>'
+        if url and _is_web_url(url)
+        else html.escape(name)
         for name, url in target.hosters
     ]
     return [f"Хостер: {', '.join(links)}"]
