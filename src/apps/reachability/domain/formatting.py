@@ -41,8 +41,9 @@ def _format_block(change: IpChange, point_names: list[str]) -> str:
     lines = [
         f"{_TITLES[change.current]}: {target.ip}",
         f"Плитки: {_format_tiles(target.tiles)}",
-        f"Ноды: {html.escape(', '.join(target.node_names))}",
     ]
+    if target.node_names:
+        lines.append(f"Ноды: {html.escape(', '.join(target.node_names))}")
     if change.current != "ok":
         names = [*point_names, OUTSIDE]
         lines.append(" · ".join(f"{n} {_mark(change.point_results.get(n))}" for n in names))

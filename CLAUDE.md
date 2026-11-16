@@ -80,6 +80,8 @@ restart_attempts >= max_attempts → эскалация 🚨 + стоп (бол�
 | `/user_traffic <имя>` | Трафик пользователя за 7 дней |
 | `/billing` | Предстоящие и просроченные платежи нод, кнопка отметки оплаты |
 | `/antifraud_check` | Разовая проверка на шеринг подписки (не дожидаясь расписания) |
+| `/blocks` | IP нод, заблокированные или частично заблокированные из РФ |
+| `/blocks_check` | Внеочередная проверка блокировок IP |
 | `/restart <имя>` | Рестарт ноды |
 | `/restart_all` | Рестарт всех нод (с подтверждением) |
 | `/mute <имя> 30m\|1h\|24h` | Заглушить алерты |
@@ -103,6 +105,36 @@ restart_attempts >= max_attempts → эскалация 🚨 + стоп (бол�
 (`traffic_block:`) — `POST /internal/users/{telegram_id}/block` на samovarbot +
 `POST /connections/drop` в панели, как в антифроде. Строка «Резкий скачок» —
 если сумма за 24ч > `TRAFFIC_ANOMALY_MULTIPLIER` × средний суточный за 7 дней.
+
+## Блокировки IP (ТСПУ)
+
+`src/apps/reachability/`. Панель и админ-бот стоят вне РФ — `is_connected` блокировку из РФ не
+видит. Раз в `REACHABILITY_INTERVAL_SECONDS` (±`REACHABILITY_JITTER_SECONDS`) бот берёт хосты
+панели с тегами из `REACHABILITY_HOST_TAGS` (CDN, LTE/белые списки и RU-6 не проверяются),
+резолвит адреса в IP и проверяет TCP + TLS-рукопожатие на каждый IP:
+- из точек в РФ (`REACHABILITY_POINTS`, по умолчанию RU-10 и TW2 — разные сети) по SSH:
+  ключ админ-бота в `authorized_keys` точки привязан к `command=` и умеет только запускать
+  `/opt/samovar-probe/probe.py` (копия `src/infrastructure/reachability/probe.py`, stdlib);
+- снаружи — тем же `probe.py` локально в админ-боте.
+
+Здоровье точки — по контрольным адресам `REACHABILITY_CONTROL_TARGETS` (не по нашим IP, иначе
+массовая волна блокировок выглядела бы как сломанная точка). Статус IP: все здоровые RU-точки
+`ok` → `ok`, ни одной → `blocked`, часть → `partial`; снаружи не `ok` — сервер лежит, проход для
+IP пропускается. Новый статус принимается после `REACHABILITY_CONFIRM_PASSES` одинаковых
+проходов подряд. Смены статусов — одной сводкой за проход; о точках — отдельные сообщения
+(«не работает» после 2 нездоровых проходов, «снова работает»). Без кнопок, без авто-действий.
+По умолчанию выключено (`REACHABILITY_ENABLED=false`).
+
+### Выкатка проверки блокировок
+
+1. На прод-сервере админ-бота: `mkdir probe-secrets && ssh-keygen -t ed25519 -N "" -C admin-bot-probe -f probe-secrets/probe_key`,
+   `ssh-keyscan -t ed25519 193.233.245.212 141.133.187.45 > probe-secrets/probe_known_hosts`.
+   `probe-secrets/` монтируется в контейнер как `/run/secrets` (только чтение).
+2. На каждой точке: `mkdir -p /opt/samovar-probe`, скопировать `probe.py`, `chmod 755`, в
+   `/root/.ssh/authorized_keys` строка
+   `command="/usr/bin/python3 /opt/samovar-probe/probe.py",no-pty,no-port-forwarding,no-agent-forwarding,no-X11-forwarding <pubkey>`.
+3. Проверка: `echo '[{"ip":"1.1.1.1","port":443,"sni":"one.one.one.one"}]' | ssh -i probe-secrets/probe_key root@<точка>` → JSON с `ok`.
+4. Миграция, `REACHABILITY_ENABLED=true`, перезапуск, `/blocks_check`.
 
 ## Антифрод (шеринг подписки по конкурентным IP)
 
@@ -178,6 +210,7 @@ ANTIFRAUD_IP_SLACK_MULTIPLIER)` — «жёсткий» (действие), вы�
 - `user_traffic_threshold_alerts` — какие пороги трафика уже алертились (user_uuid, threshold_gb, alerted_at), хранится 25ч
 - `antifraud_notified_users` — cooldown уведомлений антифрода (remnawave_id, notified_at, soft_notified_at)
 - `antifraud_violation_counts` — накопление нарушений антифрода перед алертом (remnawave_id, count, window_expires_at)
+- `ip_reachability_state` — статус доступности IP плиток из РФ (ip, status, pending_status, pending_count, last_results, changed_at, checked_at)
 
 ## Конфиг (.env)
 
@@ -224,6 +257,13 @@ ANTIFRAUD_MAXMIND_UPDATE_INTERVAL_HOURS=168  # Интервал автообно
 ANTIFRAUD_AUTO_BLOCK_ENABLED=false         # Авто-блок при 2/2 критериях, по умолчанию: false
 SAMOVARBOT_BASE_URL=                        # Базовый URL сервиса подписок (samovarbot)
 SAMOVARBOT_INTERNAL_API_KEY=                # Ключ для internal API samovarbot (X-Internal-Api-Key)
+REACHABILITY_ENABLED=false                  # Проверка блокировок IP из РФ, по умолчанию: false
+REACHABILITY_INTERVAL_SECONDS=600           # Интервал прохода, ± REACHABILITY_JITTER_SECONDS=120
+REACHABILITY_CONFIRM_PASSES=2               # Сколько одинаковых проходов подряд для смены статуса
+REACHABILITY_POINTS=[{"name":"RU-10","host":"193.233.245.212"},{"name":"TW2","host":"141.133.187.45"}]
+REACHABILITY_HOST_TAGS=["SELF","GEMINI","GAME","SMART","SMART_MAIN","EXIT","SERVICE","TELEGRAM"]
+REACHABILITY_CONTROL_TARGETS=["github.com","www.microsoft.com","www.apple.com","www.cloudflare.com"]
+REACHABILITY_SSH_KEY_PATH=/run/secrets/probe_key   # + REACHABILITY_SSH_KNOWN_HOSTS_PATH, REACHABILITY_SSH_USER=root
 ```
 
 **Важно**: `ADMIN_IDS` должен быть в JSON-формате `[id1,id2]`.

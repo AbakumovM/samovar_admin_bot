@@ -96,3 +96,15 @@ def test_point_messages() -> None:
         "\nПроверка блокировок приостановлена."
     )
     assert format_point_up("RU-10") == "✅ Точка проверки RU-10 снова работает"
+
+
+def test_nodes_line_omitted_when_unknown() -> None:
+    change = IpChange(
+        IpTarget("2.26.101.143", 443, None, ("EXITSW (sw1.samovargate.com)",), ()),
+        "ok",
+        "blocked",
+        {"RU-10": "timeout", "снаружи": "ok"},
+    )
+    text = format_digest([change], ["RU-10"])[0]
+    assert "Ноды:" not in text
+    assert "Плитки: EXITSW (sw1.samovargate.com)\nRU-10 ❌ · снаружи ✅" in text

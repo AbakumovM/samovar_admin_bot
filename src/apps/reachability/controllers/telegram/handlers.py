@@ -1,0 +1,68 @@
+import logging
+from datetime import datetime, timedelta, timezone
+
+import httpx
+from aiogram import Bot, Router
+from aiogram.filters import Command
+from aiogram.types import Message
+from dishka.integrations.aiogram import FromDishka, inject
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+from src.apps.reachability.application.interfaces.view import ReachabilityView
+from src.apps.reachability.controllers.scheduler.pass_runner import PointTracker
+from src.apps.reachability.controllers.scheduler.tasks import execute_pass
+from src.config import Config
+
+logger = logging.getLogger(__name__)
+
+router = Router()
+
+_MSK = timezone(timedelta(hours=3))
+_ICONS = {"blocked": "🚫", "partial": "⚠️"}
+
+
+def _fmt_msk(moment: datetime) -> str:
+    return moment.astimezone(_MSK).strftime("%d.%m %H:%M МСК")
+
+
+@router.message(Command("blocks"))
+@inject
+async def cmd_blocks(message: Message, view: FromDishka[ReachabilityView]) -> None:
+    rows = await view.list_not_ok()
+    if not rows:
+        await message.answer("✅ Заблокированных IP нет.")
+        return
+    lines = []
+    for row in rows:
+        since = f" — с {_fmt_msk(row.changed_at)}" if row.changed_at else ""
+        lines.append(f"{_ICONS.get(row.status, '❔')} {row.ip}{since}")
+    last_checked = await view.last_checked_at()
+    if last_checked is not None:
+        lines.append(f"\nПоследняя проверка: {_fmt_msk(last_checked)}")
+    await message.answer("\n".join(lines))
+
+
+@router.message(Command("blocks_check"))
+@inject
+async def cmd_blocks_check(
+    message: Message,
+    bot: Bot,
+    config: FromDishka[Config],
+    session_factory: FromDishka[async_sessionmaker[AsyncSession]],
+    raw_client: FromDishka[httpx.AsyncClient],
+    tracker: FromDishka[PointTracker],
+) -> None:
+    if not config.reachability_enabled:
+        await message.answer("Проверка блокировок выключена (REACHABILITY_ENABLED=false).")
+        return
+    status = await message.answer("⏳ Проверяю…")
+    try:
+        result = await execute_pass(config, session_factory, raw_client, bot, tracker)
+    except Exception as e:
+        logger.error("Manual reachability check failed: %r", e)
+        await status.edit_text(f"❌ Ошибка проверки: {e}")
+        return
+    if result.skipped:
+        await status.edit_text("⚠️ Проверка пропущена: нет работающих точек")
+    else:
+        await status.edit_text(f"✅ Проверено IP: {result.checked}, не в порядке: {result.not_ok}")

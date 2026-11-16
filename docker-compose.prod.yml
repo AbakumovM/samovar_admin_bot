@@ -8,6 +8,9 @@ services:
         condition: service_healthy
     environment:
       DATABASE_URL: postgresql+asyncpg://botuser:botpass@postgres:5432/botdb
+    volumes:
+      # SSH key + known_hosts for reachability probe points (REACHABILITY_*)
+      - ./probe-secrets:/run/secrets:ro
 
   postgres:
     image: postgres:16-alpine

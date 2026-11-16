@@ -22,3 +22,6 @@ def test_env_example_loads() -> None:
     config = Config(_env_file=".env.example")  # type: ignore[call-arg]
     assert config.traffic_alert_thresholds_gb == [30, 50, 100, 150]
     assert config.traffic_critical_threshold_gb == 150
+    assert config.reachability_enabled is False
+    assert config.reachability_points[0].name == "RU-10"
+    assert config.reachability_host_tags[0] == "SELF"

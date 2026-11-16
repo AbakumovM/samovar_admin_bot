@@ -17,6 +17,10 @@ from src.apps.incidents.ioc import IncidentAdaptersProvider, IncidentInteractors
 from src.apps.nodes.controllers.scheduler.tasks import fast_monitoring_task, monitoring_task
 from src.apps.nodes.controllers.telegram.handlers import router as nodes_router
 from src.apps.nodes.ioc import NodeAdaptersProvider, NodeInteractorsProvider
+from src.apps.reachability.controllers.scheduler.pass_runner import PointTracker
+from src.apps.reachability.controllers.scheduler.tasks import reachability_task
+from src.apps.reachability.controllers.telegram.handlers import router as reachability_router
+from src.apps.reachability.ioc import ReachabilityAdaptersProvider
 from src.apps.users.controllers.scheduler.tasks import traffic_monitoring_task
 from src.apps.users.controllers.telegram.handlers import router as users_router
 from src.apps.users.ioc import UserTrafficAdaptersProvider
@@ -56,6 +60,7 @@ async def main() -> None:
     bot = create_bot(config)
     dp: Dispatcher = create_dispatcher(config)
 
+    reachability_tracker = PointTracker()
     user_cache = UserLookupCache(ttl_seconds=config.antifraud_user_cache_ttl_seconds)
     asn_resolver: AsnResolver
     if config.antifraud_asn_grouping:
@@ -99,6 +104,10 @@ async def main() -> None:
             return user_cache
 
         @dishka_provide
+        async def get_reachability_tracker(self) -> PointTracker:
+            return reachability_tracker
+
+        @dishka_provide
         async def get_asn_resolver(self) -> AsnResolver:
             return asn_resolver
 
@@ -126,6 +135,7 @@ async def main() -> None:
         BillingAdaptersProvider(),
         AntifraudAdaptersProvider(),
         AntifraudInteractorsProvider(),
+        ReachabilityAdaptersProvider(),
     )
     setup_dishka(container=container, router=dp)
 
@@ -134,6 +144,7 @@ async def main() -> None:
     dp.include_router(users_router)
     dp.include_router(billing_router)
     dp.include_router(antifraud_router)
+    dp.include_router(reachability_router)
 
     notify = await _make_notify_fn(bot, config.admin_ids)
 
@@ -162,6 +173,8 @@ async def main() -> None:
             BotCommand(command="billing", description="Предстоящие платежи нод"),
             BotCommand(command="billing_history", description="История платежей"),
             BotCommand(command="antifraud_check", description="Разовая проверка антифрода"),
+            BotCommand(command="blocks", description="Заблокированные IP нод"),
+            BotCommand(command="blocks_check", description="Проверить блокировки сейчас"),
         ]
     )
 
@@ -173,6 +186,7 @@ async def main() -> None:
         daily_report_task(config, session_factory, notify),
         traffic_monitoring_task(config, session_factory, raw_client, bot),
         billing_alert_task(config, sdk, bot),
+        reachability_task(config, session_factory, raw_client, bot, reachability_tracker),
         antifraud_scan_task(
             config,
             session_factory,
