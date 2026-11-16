@@ -95,6 +95,7 @@ class Config(BaseSettings):
     reachability_interval_seconds: int = 600
     reachability_jitter_seconds: int = 120
     reachability_confirm_passes: int = 2
+    reachability_reminder_hours: float = 6.0
     reachability_timeout_seconds: float = 5.0
     reachability_point_timeout_seconds: float = 30.0
     reachability_control_targets: list[str] = [

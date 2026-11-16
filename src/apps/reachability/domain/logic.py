@@ -1,3 +1,4 @@
+from dataclasses import replace
 from typing import Literal
 
 from src.apps.reachability.domain.models import IpState, Transition
@@ -27,12 +28,13 @@ def advance(
     """Accept a new status only after `confirm_passes` identical observations in a row."""
     current = state or IpState(ip=ip, status=None, pending_status=None, pending_count=0)
     if observation == current.status:
-        return IpState(ip, current.status, None, 0), None
+        return replace(current, pending_status=None, pending_count=0), None
 
     count = current.pending_count + 1 if observation == current.pending_status else 1
     if count >= confirm_passes:
-        return IpState(ip, observation, None, 0), Transition(ip, current.status, observation)
-    return IpState(ip, current.status, observation, count), None
+        accepted = replace(current, status=observation, pending_status=None, pending_count=0)
+        return accepted, Transition(ip, current.status, observation)
+    return replace(current, pending_status=observation, pending_count=count), None
 
 
 def should_notify(transition: Transition) -> bool:

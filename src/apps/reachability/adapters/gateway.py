@@ -25,6 +25,7 @@ class PostgresReachabilityGateway:
             "pending_count": state.pending_count,
             "last_results": last_results,
             "checked_at": checked_at,
+            "notified_at": state.notified_at,
         }
         if changed:
             values["changed_at"] = checked_at

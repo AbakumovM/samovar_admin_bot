@@ -8,6 +8,8 @@ class IpState:
     status: str | None  # accepted: ok | partial | blocked; None until first confirmed
     pending_status: str | None
     pending_count: int
+    changed_at: datetime | None = None
+    notified_at: datetime | None = None  # last alert or reminder about this IP
 
 
 @dataclass(frozen=True)

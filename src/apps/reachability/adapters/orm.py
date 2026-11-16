@@ -18,3 +18,4 @@ class IpReachabilityStateModel(Base):
     last_results: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
     changed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     checked_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    notified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

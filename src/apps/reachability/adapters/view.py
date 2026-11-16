@@ -25,7 +25,9 @@ class PostgresReachabilityView:
             select(IpReachabilityStateModel).where(IpReachabilityStateModel.ip == any_(ip_array))
         )
         return {
-            m.ip: IpState(m.ip, m.status, m.pending_status, m.pending_count)
+            m.ip: IpState(
+                m.ip, m.status, m.pending_status, m.pending_count, m.changed_at, m.notified_at
+            )
             for m in result.scalars().all()
         }
 

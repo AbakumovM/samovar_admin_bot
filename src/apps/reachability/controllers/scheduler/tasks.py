@@ -2,7 +2,7 @@ import asyncio
 import html
 import logging
 import random
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import httpx
@@ -118,6 +118,7 @@ async def execute_pass(
                 tracker=tracker,
                 confirm_passes=config.reachability_confirm_passes,
                 min_ok_ratio=config.reachability_control_min_ok_ratio,
+                reminder_after=timedelta(hours=config.reachability_reminder_hours),
                 now=datetime.now(UTC),
             )
 

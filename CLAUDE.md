@@ -122,7 +122,10 @@ restart_attempts >= max_attempts → эскалация 🚨 + стоп (бол�
 `ok` → `ok`, ни одной → `blocked`, часть → `partial`; снаружи не `ok` — сервер лежит, проход для
 IP пропускается. Новый статус принимается после `REACHABILITY_CONFIRM_PASSES` одинаковых
 проходов подряд. Смены статусов — одной сводкой за проход; о точках — отдельные сообщения
-(«не работает» после 2 нездоровых проходов, «снова работает»). Без кнопок, без авто-действий.
+(«не работает» после 2 нездоровых проходов, «снова работает»). Пока IP `blocked`/`partial` —
+напоминание «🔁 Всё ещё заблокированы» раз в `REACHABILITY_REMINDER_HOURS` (по IP, одной сводкой
+за проход). В блоках — «Хостер» со ссылкой на кабинет (`node.provider.loginUrl` в панели).
+Без кнопок, без авто-действий.
 По умолчанию выключено (`REACHABILITY_ENABLED=false`).
 
 ### Выкатка проверки блокировок
@@ -222,7 +225,7 @@ ANTIFRAUD_IP_SLACK_MULTIPLIER)` — «жёсткий» (действие), вы�
 - `user_traffic_threshold_alerts` — какие пороги трафика уже алертились (user_uuid, threshold_gb, alerted_at), хранится 25ч
 - `antifraud_notified_users` — cooldown уведомлений антифрода (remnawave_id, notified_at, soft_notified_at)
 - `antifraud_violation_counts` — накопление нарушений антифрода перед алертом (remnawave_id, count, window_expires_at)
-- `ip_reachability_state` — статус доступности IP плиток из РФ (ip, status, pending_status, pending_count, last_results, changed_at, checked_at)
+- `ip_reachability_state` — статус доступности IP плиток из РФ (ip, status, pending_status, pending_count, last_results, changed_at, checked_at, notified_at)
 
 ## Конфиг (.env)
 
@@ -272,6 +275,7 @@ SAMOVARBOT_INTERNAL_API_KEY=                # Ключ для internal API samov
 REACHABILITY_ENABLED=false                  # Проверка блокировок IP из РФ, по умолчанию: false
 REACHABILITY_INTERVAL_SECONDS=600           # Интервал прохода, ± REACHABILITY_JITTER_SECONDS=120
 REACHABILITY_CONFIRM_PASSES=2               # Сколько одинаковых проходов подряд для смены статуса
+REACHABILITY_REMINDER_HOURS=6               # Напоминание «🔁 Всё ещё заблокированы» не чаще раза в N часов на IP
 REACHABILITY_POINTS=[{"name":"RU-10","host":"193.233.245.212"},{"name":"TW2","host":"141.133.187.45"}]
 REACHABILITY_HOST_TAGS=["SELF","GEMINI","GAME","SMART","SMART_MAIN","EXIT","SERVICE","TELEGRAM"]
 REACHABILITY_CONTROL_TARGETS=["github.com","www.microsoft.com","www.apple.com","www.cloudflare.com"]

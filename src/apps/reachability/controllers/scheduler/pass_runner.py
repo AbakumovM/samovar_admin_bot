@@ -1,15 +1,17 @@
 import asyncio
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass, field
-from datetime import datetime
+from dataclasses import dataclass, field, replace
+from datetime import datetime, timedelta
 from typing import Any, Literal, Protocol
 
 from src.apps.reachability.domain.formatting import (
     OUTSIDE,
     IpChange,
+    ReminderItem,
     format_digest,
     format_point_down,
     format_point_up,
+    format_reminder,
     reason_control,
     reason_ssh,
 )
@@ -113,6 +115,7 @@ async def run_pass(
     tracker: PointTracker,
     confirm_passes: int,
     min_ok_ratio: float,
+    reminder_after: timedelta,
     now: datetime,
 ) -> PassResult:
     targets = build_targets(select_hosts(hosts, tags), nodes, resolved)
@@ -152,6 +155,7 @@ async def run_pass(
         return PassResult(checked=0, not_ok=_count_not_ok(current), skipped=True, messages=messages)
 
     changes: list[IpChange] = []
+    reminders: list[ReminderItem] = []
     for index, target in enumerate(targets):
         outside = str(outside_results[index]["result"])
         ru = {name: str(results[index]["result"]) for name, results in healthy_points.items()}
@@ -161,12 +165,23 @@ async def run_pass(
         last_results: dict[str, str | None] = {p.name: ru.get(p.name) for p in points}
         last_results[OUTSIDE] = outside
         state, transition = advance(current.get(target.ip), target.ip, observation, confirm_passes)
+        if transition is not None:
+            state = replace(state, changed_at=now)
+            if should_notify(transition):
+                state = replace(state, notified_at=now)
+                changes.append(
+                    IpChange(target, transition.previous, transition.current, last_results)
+                )
+        elif state.status in ("partial", "blocked") and (
+            state.notified_at is None or now - state.notified_at >= reminder_after
+        ):
+            reminders.append(ReminderItem(target, state.status, state.changed_at))
+            state = replace(state, notified_at=now)
         current[target.ip] = state
         await states.save(state, last_results, now, changed=transition is not None)
-        if transition is not None and should_notify(transition):
-            changes.append(IpChange(target, transition.previous, transition.current, last_results))
 
     messages.extend(format_digest(changes, [p.name for p in points]))
+    messages.extend(format_reminder(reminders))
     return PassResult(
         checked=len(targets), not_ok=_count_not_ok(current), skipped=False, messages=messages
     )

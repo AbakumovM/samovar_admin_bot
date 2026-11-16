@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from src.apps.reachability.controllers.scheduler.pass_runner import (
@@ -90,6 +90,7 @@ async def _pass(
         tracker=tracker,
         confirm_passes=2,
         min_ok_ratio=0.5,
+        reminder_after=timedelta(hours=6),
         now=NOW,
     )
 
@@ -160,7 +161,7 @@ async def test_outside_unhealthy_skips_pass() -> None:
 
 
 async def test_ip_returns_with_saved_status() -> None:
-    store, tracker = MemoryStore({IP: IpState(IP, "blocked", None, 0)}), PointTracker()
+    store, tracker = MemoryStore({IP: IpState(IP, "blocked", None, 0, None, NOW)}), PointTracker()
     for _ in range(2):
         result = await _pass(store, tracker, BLOCKED)
         assert result.messages == []
@@ -173,3 +174,41 @@ async def test_point_recovers_message() -> None:
     await _pass(store, tracker, down)
     result = await _pass(store, tracker, ALL_OK)
     assert "✅ Точка проверки RU-10 снова работает" in result.messages
+
+
+async def test_confirmed_change_stamps_changed_and_notified() -> None:
+    store, tracker = MemoryStore({IP: IpState(IP, "ok", None, 0)}), PointTracker()
+    await _pass(store, tracker, BLOCKED)
+    await _pass(store, tracker, BLOCKED)
+    assert store.states[IP].changed_at == NOW
+    assert store.states[IP].notified_at == NOW
+
+
+async def test_reminder_after_six_hours() -> None:
+    since = NOW - timedelta(hours=10)
+    store = MemoryStore({IP: IpState(IP, "blocked", None, 0, since, NOW - timedelta(hours=7))})
+    result = await _pass(store, PointTracker(), BLOCKED)
+    assert len(result.messages) == 1
+    assert result.messages[0].startswith(
+        "🔁 Всё ещё заблокированы\n\n🚫 1.2.3.4 — с 16.11 05:00 МСК"
+    )
+    assert store.states[IP].notified_at == NOW
+    assert store.states[IP].changed_at == since
+
+
+async def test_no_reminder_within_six_hours() -> None:
+    store = MemoryStore({IP: IpState(IP, "blocked", None, 0, None, NOW - timedelta(hours=1))})
+    result = await _pass(store, PointTracker(), BLOCKED)
+    assert result.messages == []
+
+
+async def test_legacy_blocked_without_notified_at_is_reminded() -> None:
+    store = MemoryStore({IP: IpState(IP, "blocked", None, 0)})
+    result = await _pass(store, PointTracker(), BLOCKED)
+    assert any(m.startswith("🔁 Всё ещё заблокированы") for m in result.messages)
+
+
+async def test_ok_ip_never_reminded() -> None:
+    store = MemoryStore({IP: IpState(IP, "ok", None, 0, None, NOW - timedelta(days=2))})
+    result = await _pass(store, PointTracker(), ALL_OK)
+    assert result.messages == []

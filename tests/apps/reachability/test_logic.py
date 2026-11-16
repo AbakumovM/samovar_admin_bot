@@ -81,3 +81,12 @@ def test_mass_block_keeps_points_healthy() -> None:
     assert is_point_healthy(["ok"] * 4, 0.5) is True
     observations = [observe("ok", {"RU-10": "timeout", "TW2": "timeout"}) for _ in range(20)]
     assert observations == ["blocked"] * 20
+
+
+def test_advance_preserves_timestamps() -> None:
+    from datetime import UTC, datetime
+
+    t0 = datetime(2026, 11, 16, tzinfo=UTC)
+    state = IpState(IP, "blocked", None, 0, t0, t0)
+    state, _ = advance(state, IP, "ok", 2)
+    assert (state.changed_at, state.notified_at) == (t0, t0)
