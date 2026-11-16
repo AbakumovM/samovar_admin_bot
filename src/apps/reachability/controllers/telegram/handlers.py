@@ -1,5 +1,5 @@
 import logging
-from datetime import UTC, datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import httpx
 from aiogram import Bot, Router
@@ -11,22 +11,18 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from src.apps.reachability.application.interfaces.view import ReachabilityView
 from src.apps.reachability.controllers.scheduler.pass_runner import PointTracker
 from src.apps.reachability.controllers.scheduler.tasks import execute_pass
+from src.apps.reachability.domain.formatting import fmt_msk
 from src.config import Config
 
 logger = logging.getLogger(__name__)
 
 router = Router()
 
-_MSK = timezone(timedelta(hours=3))
 _ICONS = {"blocked": "🚫", "partial": "⚠️"}
 
 
 def _now() -> datetime:
     return datetime.now(UTC)
-
-
-def _fmt_msk(moment: datetime) -> str:
-    return moment.astimezone(_MSK).strftime("%d.%m %H:%M МСК")
 
 
 @router.message(Command("blocks"))
@@ -41,14 +37,14 @@ async def cmd_blocks(
     rows = await view.list_not_ok(fresh_since)
     lines = []
     for row in rows:
-        since = f" — с {_fmt_msk(row.changed_at)}" if row.changed_at else ""
+        since = f" — с {fmt_msk(row.changed_at)}" if row.changed_at else ""
         lines.append(f"{_ICONS.get(row.status, '❔')} {row.ip}{since}")
     if not rows:
         lines.append("✅ Заблокированных IP нет.")
     lines.extend(f"⏸ Точка проверки {name} не работает" for name in tracker.down_points())
     last_checked = await view.last_checked_at()
     footer = (
-        f"Последняя проверка: {_fmt_msk(last_checked)}"
+        f"Последняя проверка: {fmt_msk(last_checked)}"
         if last_checked is not None
         else "Проверок ещё не было."
     )

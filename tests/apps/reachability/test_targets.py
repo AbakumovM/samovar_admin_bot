@@ -45,6 +45,7 @@ def test_same_ip_two_tiles_one_target() -> None:
                 "SMART · NL-3 (nl3.samovargate.com)",
             ),
             node_names=("NL-3",),
+            hosters=(),
         )
     ]
 
@@ -65,3 +66,32 @@ def test_explicit_sni_wins() -> None:
 
 def test_unresolved_address_skipped() -> None:
     assert build_targets([_host("x", "a.com", ["SELF"])], [], {}) == []
+
+
+def test_hosters_from_node_provider() -> None:
+    hosts = [
+        _host("a", "x.com", ["SELF"], nodes=["u1", "u2", "u3"]),
+    ]
+    nodes = [
+        {
+            "uuid": "u1",
+            "name": "N1",
+            "provider": {"name": "play2go", "loginUrl": "https://play2go.cloud/me"},
+        },
+        {
+            "uuid": "u2",
+            "name": "N2",
+            "provider": {"name": "play2go", "loginUrl": "https://play2go.cloud/me"},
+        },
+        {"uuid": "u3", "name": "N3", "provider": {"name": "4vps.su", "loginUrl": None}},
+    ]
+    target = build_targets(hosts, nodes, {"x.com": ["1.2.3.4"]})[0]
+    assert target.hosters == (("4vps.su", None), ("play2go", "https://play2go.cloud/me"))
+
+
+def test_no_provider_no_hosters() -> None:
+    nodes = [{"uuid": "u1", "name": "N1", "provider": None}]
+    target = build_targets(
+        [_host("a", "x.com", ["SELF"], nodes=["u1"])], nodes, {"x.com": ["1.2.3.4"]}
+    )[0]
+    assert target.hosters == ()

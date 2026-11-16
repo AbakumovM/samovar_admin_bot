@@ -1,8 +1,12 @@
+from datetime import UTC, datetime
+
 from src.apps.reachability.domain.formatting import (
     IpChange,
+    ReminderItem,
     format_digest,
     format_point_down,
     format_point_up,
+    format_reminder,
     reason_control,
     reason_ssh,
 )
@@ -15,6 +19,7 @@ BLOCKED = IpChange(
         "nl1.samovargate.com",
         ("🇳🇱 Нидерланды (nl1.samovargate.com)",),
         ("NL-1",),
+        (("4vps.su", "https://4vps.su"),),
     ),
     "ok",
     "blocked",
@@ -40,7 +45,8 @@ def test_digest_exact_text_and_order() -> None:
         "🚫 Заблокирован: 157.22.177.33\n"
         "Плитки: 🇳🇱 Нидерланды (nl1.samovargate.com)\n"
         "Ноды: NL-1\n"
-        "RU-10 ❌ · TW2 ❌ · снаружи ✅\n\n"
+        "RU-10 ❌ · TW2 ❌ · снаружи ✅\n"
+        'Хостер: <a href="https://4vps.su">4vps.su</a>\n\n'
         "✅ Снова доступен: 147.45.179.34\n"
         "Плитки: 🇬🇧 Великобритания (hazel.nodlsd.com)\n"
         "Ноды: UK-1"
@@ -108,3 +114,43 @@ def test_nodes_line_omitted_when_unknown() -> None:
     text = format_digest([change], ["RU-10"])[0]
     assert "Ноды:" not in text
     assert "Плитки: EXITSW (sw1.samovargate.com)\nRU-10 ❌ · снаружи ✅" in text
+
+
+def test_reminder_exact_text() -> None:
+    uk = IpTarget(
+        "147.45.179.34",
+        443,
+        "hazel.nodlsd.com",
+        ("🇬🇧 Великобритания (hazel.nodlsd.com)",),
+        ("UK-1",),
+        (("4vps.su", "https://4vps.su"),),
+    )
+    nl = IpTarget(
+        "2.27.201.110",
+        443,
+        None,
+        ("🇳🇱 Нидерланды (nl3.samovargate.com)",),
+        ("NL-3",),
+        (("play2go", "https://play2go.cloud/me"), ("x&y", None)),
+    )
+    items = [
+        ReminderItem(nl, "partial", datetime(2026, 11, 16, 9, 10, tzinfo=UTC)),
+        ReminderItem(uk, "blocked", datetime(2026, 11, 16, 15, 44, tzinfo=UTC)),
+    ]
+    assert format_reminder(items) == [
+        "🔁 Всё ещё заблокированы\n\n"
+        "🚫 147.45.179.34 — с 16.11 18:44 МСК\n"
+        "Плитки: 🇬🇧 Великобритания (hazel.nodlsd.com)\n"
+        "Ноды: UK-1\n"
+        'Хостер: <a href="https://4vps.su">4vps.su</a>\n\n'
+        "⚠️ 2.27.201.110 (частично) — с 16.11 12:10 МСК\n"
+        "Плитки: 🇳🇱 Нидерланды (nl3.samovargate.com)\n"
+        "Ноды: NL-3\n"
+        'Хостер: <a href="https://play2go.cloud/me">play2go</a>, x&amp;y'
+    ]
+
+
+def test_reminder_without_since_and_hosters() -> None:
+    target = IpTarget("1.1.1.1", 443, None, ("t (a)",), (), ())
+    text = format_reminder([ReminderItem(target, "blocked", None)])[0]
+    assert text == "🔁 Всё ещё заблокированы\n\n🚫 1.1.1.1\nПлитки: t (a)"

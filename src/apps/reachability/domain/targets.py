@@ -12,6 +12,7 @@ class IpTarget:
     sni: str | None
     tiles: tuple[str, ...]  # "remark (address)"
     node_names: tuple[str, ...]
+    hosters: tuple[tuple[str, str | None], ...] = ()  # (name, cabinet URL) from node.provider
 
 
 def _is_ip_literal(address: str) -> bool:
@@ -33,6 +34,11 @@ def build_targets(
 ) -> list[IpTarget]:
     """Group hosts by resolved IP: one target per IP, listing every tile and node on it."""
     node_names = {str(n["uuid"]): str(n["name"]) for n in nodes}
+    node_hosters: dict[str, tuple[str, str | None]] = {}
+    for n in nodes:
+        provider = n.get("provider") or {}
+        if provider.get("name"):
+            node_hosters[str(n["uuid"])] = (str(provider["name"]), provider.get("loginUrl") or None)
     by_ip: dict[str, dict[str, Any]] = {}
     for host in hosts:
         address = str(host["address"])
@@ -44,6 +50,7 @@ def build_targets(
                     "sni": host.get("sni") or (None if _is_ip_literal(address) else address),
                     "tiles": [],
                     "nodes": set(),
+                    "hosters": set(),
                 },
             )
             tile = f"{host['remark']} ({address})"
@@ -52,6 +59,8 @@ def build_targets(
             for node_uuid in host.get("nodes") or []:
                 if str(node_uuid) in node_names:
                     entry["nodes"].add(node_names[str(node_uuid)])
+                if str(node_uuid) in node_hosters:
+                    entry["hosters"].add(node_hosters[str(node_uuid)])
     return [
         IpTarget(
             ip=ip,
@@ -59,6 +68,7 @@ def build_targets(
             sni=entry["sni"],
             tiles=tuple(entry["tiles"]),
             node_names=tuple(sorted(entry["nodes"])),
+            hosters=tuple(sorted(entry["hosters"], key=lambda h: h[0])),
         )
         for ip, entry in by_ip.items()
     ]
