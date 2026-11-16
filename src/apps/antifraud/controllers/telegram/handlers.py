@@ -9,12 +9,12 @@ from remnawave import RemnawaveSDK
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from src.apps.antifraud.controllers.scheduler.tasks import (
-    _drop_connections,
     _mark_blocked_in_keyboard,
     _run_antifraud_scan,
 )
 from src.config import Config
 from src.infrastructure.geoip.asn import AsnResolver
+from src.infrastructure.remnawave.connections import drop_user_connections
 from src.infrastructure.remnawave.user_cache import UserLookupCache
 from src.infrastructure.samovarbot.client import SamovarbotClient, block_user
 
@@ -82,7 +82,7 @@ async def callback_block_user(
     if not blocked:
         await callback.answer("⚠️ Не удалось заблокировать", show_alert=True)
         return
-    await _drop_connections(raw_client, remnawave_id)
+    await drop_user_connections(raw_client, remnawave_id)
 
     if isinstance(callback.message, Message) and callback.message.reply_markup is not None:
         try:

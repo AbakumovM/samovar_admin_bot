@@ -25,6 +25,7 @@ from src.apps.antifraud.domain.models import (
 )
 from src.config import Config
 from src.infrastructure.geoip.asn import AsnResolver
+from src.infrastructure.remnawave.connections import drop_user_connections
 from src.infrastructure.remnawave.user_cache import UserLookupCache
 from src.infrastructure.samovarbot.client import (
     SamovarbotClient,
@@ -631,22 +632,6 @@ async def _enrich_hard_with_new_criteria(
     return enriched
 
 
-async def _drop_connections(raw_client: httpx.AsyncClient, remnawave_id: int) -> bool:
-    try:
-        response = await raw_client.post(
-            "/connections/drop",
-            json={
-                "dropBy": {"by": "userIds", "userIds": [remnawave_id]},
-                "targetNodes": {"target": "allNodes"},
-            },
-        )
-        response.raise_for_status()
-        return True
-    except Exception as e:
-        logger.error("Antifraud: drop-connections failed for %d: %s", remnawave_id, e)
-        return False
-
-
 async def _run_antifraud_scan(
     config: Config,
     session_factory: async_sessionmaker,  # type: ignore[type-arg]
@@ -758,7 +743,7 @@ async def _run_antifraud_scan(
                             )
                             blocked = await block_user(samovarbot_client, f.telegram_id, reason)
                             if blocked:
-                                await _drop_connections(raw_client, f.remnawave_id)
+                                await drop_user_connections(raw_client, f.remnawave_id)
                                 auto_blocked.append(f)
                             else:
                                 logger.error(
