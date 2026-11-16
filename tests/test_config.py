@@ -17,3 +17,9 @@ def test_antifraud_autoblock_defaults() -> None:
     assert config.antifraud_auto_block_enabled is False
     assert config.samovarbot_base_url == ""
     assert config.samovarbot_internal_api_key == ""
+
+
+def test_env_example_loads() -> None:
+    config = Config(_env_file=".env.example")  # type: ignore[call-arg]
+    assert config.traffic_alert_thresholds_gb == [30, 50, 100, 150]
+    assert config.traffic_critical_threshold_gb == 150
