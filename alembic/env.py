@@ -11,7 +11,12 @@ from src.apps.antifraud.adapters.orm import (  # noqa: F401
 )
 from src.apps.incidents.adapters.orm import IncidentModel, NodeStatsSnapshotModel  # noqa: F401
 from src.apps.nodes.adapters.orm import MutedNodeModel  # noqa: F401
-from src.apps.users.adapters.orm import UserTrafficDailyModel, UserTrafficLastSnapshotModel  # noqa: F401
+from src.apps.users.adapters.orm import (  # noqa: F401
+    UserTrafficDailyModel,
+    UserTrafficHourlyModel,
+    UserTrafficLastSnapshotModel,
+    UserTrafficThresholdAlertModel,
+)
 from src.infrastructure.db.base import Base
 
 config = context.config

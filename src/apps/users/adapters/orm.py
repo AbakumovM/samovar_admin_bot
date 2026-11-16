@@ -1,6 +1,15 @@
 from datetime import date, datetime
 
-from sqlalchemy import BigInteger, Boolean, Date, DateTime, Integer, String, UniqueConstraint
+from sqlalchemy import (
+    BigInteger,
+    Boolean,
+    Date,
+    DateTime,
+    Index,
+    Integer,
+    String,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from src.infrastructure.db.base import Base
@@ -25,6 +34,23 @@ class UserTrafficDailyModel(Base):
     bytes_consumed: Mapped[int] = mapped_column(BigInteger, default=0)
     anomaly_alerted: Mapped[bool] = mapped_column(Boolean, default=False)
 
-    __table_args__ = (
-        UniqueConstraint("user_uuid", "date", name="uq_user_traffic_daily"),
-    )
+    __table_args__ = (UniqueConstraint("user_uuid", "date", name="uq_user_traffic_daily"),)
+
+
+class UserTrafficHourlyModel(Base):
+    __tablename__ = "user_traffic_hourly"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_uuid: Mapped[str] = mapped_column(String(255))
+    recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    delta_bytes: Mapped[int] = mapped_column(BigInteger)
+
+    __table_args__ = (Index("ix_user_traffic_hourly_user_recorded", "user_uuid", "recorded_at"),)
+
+
+class UserTrafficThresholdAlertModel(Base):
+    __tablename__ = "user_traffic_threshold_alerts"
+
+    user_uuid: Mapped[str] = mapped_column(String(255), primary_key=True)
+    threshold_gb: Mapped[int] = mapped_column(Integer, primary_key=True)
+    alerted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))

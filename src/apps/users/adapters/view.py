@@ -1,9 +1,14 @@
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.apps.users.adapters.orm import UserTrafficDailyModel, UserTrafficLastSnapshotModel
+from src.apps.users.adapters.orm import (
+    UserTrafficDailyModel,
+    UserTrafficHourlyModel,
+    UserTrafficLastSnapshotModel,
+    UserTrafficThresholdAlertModel,
+)
 from src.apps.users.domain.models import UserTrafficDailyInfo, UserTrafficSnapshotInfo
 
 
@@ -107,3 +112,38 @@ class PostgresUserTrafficView:
             .order_by(UserTrafficDailyModel.date.asc())
         )
         return [_to_daily_info(m) for m in result.scalars().all()]
+
+    async def get_traffic_since(self, user_uuids: list[str], since: datetime) -> dict[str, int]:
+        if not user_uuids:
+            return {}
+        result = await self._session.execute(
+            select(
+                UserTrafficHourlyModel.user_uuid,
+                func.sum(UserTrafficHourlyModel.delta_bytes).label("total"),
+            )
+            .where(
+                UserTrafficHourlyModel.user_uuid.in_(user_uuids),
+                UserTrafficHourlyModel.recorded_at > since,
+            )
+            .group_by(UserTrafficHourlyModel.user_uuid)
+        )
+        return {row.user_uuid: int(row.total) for row in result.all()}
+
+    async def get_alerted_thresholds_since(
+        self, user_uuids: list[str], since: datetime
+    ) -> dict[str, set[int]]:
+        if not user_uuids:
+            return {}
+        result = await self._session.execute(
+            select(
+                UserTrafficThresholdAlertModel.user_uuid,
+                UserTrafficThresholdAlertModel.threshold_gb,
+            ).where(
+                UserTrafficThresholdAlertModel.user_uuid.in_(user_uuids),
+                UserTrafficThresholdAlertModel.alerted_at > since,
+            )
+        )
+        alerted: dict[str, set[int]] = {}
+        for row in result.all():
+            alerted.setdefault(row.user_uuid, set()).add(row.threshold_gb)
+        return alerted

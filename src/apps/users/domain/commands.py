@@ -22,3 +22,22 @@ class UpdateLastSnapshot:
 class MarkAnomalyAlerted:
     user_uuid: str
     date: date
+
+
+@dataclass(frozen=True)
+class AddHourlyTraffic:
+    user_uuid: str
+    recorded_at: datetime
+    delta_bytes: int
+
+
+@dataclass(frozen=True)
+class MarkThresholdsAlerted:
+    user_uuid: str
+    thresholds_gb: list[int]
+    alerted_at: datetime
+
+
+@dataclass(frozen=True)
+class PurgeTrafficHistory:
+    before: datetime
