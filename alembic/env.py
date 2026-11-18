@@ -14,7 +14,6 @@ from src.apps.nodes.adapters.orm import MutedNodeModel  # noqa: F401
 from src.apps.reachability.adapters.orm import IpReachabilityStateModel  # noqa: F401
 from src.apps.users.adapters.orm import (  # noqa: F401
     UserTrafficDailyModel,
-    UserTrafficHourlyModel,
     UserTrafficLastSnapshotModel,
     UserTrafficThresholdAlertModel,
 )
