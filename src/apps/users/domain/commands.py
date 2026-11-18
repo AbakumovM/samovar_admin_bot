@@ -25,13 +25,6 @@ class MarkAnomalyAlerted:
 
 
 @dataclass(frozen=True)
-class AddHourlyTraffic:
-    user_uuid: str
-    recorded_at: datetime
-    delta_bytes: int
-
-
-@dataclass(frozen=True)
 class MarkThresholdsAlerted:
     user_uuid: str
     thresholds_gb: list[int]
@@ -39,5 +32,5 @@ class MarkThresholdsAlerted:
 
 
 @dataclass(frozen=True)
-class PurgeTrafficHistory:
+class PurgeThresholdAlerts:
     before: datetime

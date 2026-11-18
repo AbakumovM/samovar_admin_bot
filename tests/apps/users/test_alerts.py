@@ -41,14 +41,16 @@ def test_format_regular_alert_with_spike() -> None:
     text = format_threshold_alert("ivan<1>", int(57.3 * GB), 50, 150, 15.2 * GB, spike=True)
     assert text == (
         "⚠️ Высокий трафик: <b>ivan&lt;1&gt;</b>\n"
-        "За 24 часа: 57.3 GB (порог 50 GB)\n"
+        "За сегодня (с 03:00 МСК): 57.3 GB (порог 50 GB)\n"
         "• Резкий скачок ×3.8 (обычно ~15.2 GB/день)"
     )
 
 
 def test_format_critical_alert_without_spike() -> None:
     text = format_threshold_alert("ivan", int(152.4 * GB), 150, 150, 0.0, spike=False)
-    assert text == "🚨 Возможна перепродажа: <b>ivan</b>\nЗа 24 часа: 152.4 GB (порог 150 GB)"
+    assert text == (
+        "🚨 Возможна перепродажа: <b>ivan</b>\nЗа сегодня (с 03:00 МСК): 152.4 GB (порог 150 GB)"
+    )
 
 
 def test_make_block_keyboard_callback() -> None:

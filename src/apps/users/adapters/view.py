@@ -7,7 +7,6 @@ from sqlalchemy.sql.elements import BindParameter
 
 from src.apps.users.adapters.orm import (
     UserTrafficDailyModel,
-    UserTrafficHourlyModel,
     UserTrafficLastSnapshotModel,
     UserTrafficThresholdAlertModel,
 )
@@ -89,6 +88,18 @@ class PostgresUserTrafficView:
         )
         return [_to_daily_info(m) for m in result.scalars().all()]
 
+    async def get_alerted_today(self, limit: int) -> list[UserTrafficDailyInfo]:
+        result = await self._session.execute(
+            select(UserTrafficDailyModel)
+            .where(
+                UserTrafficDailyModel.date == date.today(),
+                UserTrafficDailyModel.anomaly_alerted.is_(True),
+            )
+            .order_by(UserTrafficDailyModel.bytes_consumed.desc())
+            .limit(limit)
+        )
+        return [_to_daily_info(m) for m in result.scalars().all()]
+
     async def get_avg_daily_7d(self, user_uuid: str) -> float:
         cutoff = date.today() - timedelta(days=7)
         result = await self._session.execute(
@@ -115,21 +126,16 @@ class PostgresUserTrafficView:
         )
         return [_to_daily_info(m) for m in result.scalars().all()]
 
-    async def get_traffic_since(self, user_uuids: list[str], since: datetime) -> dict[str, int]:
+    async def get_traffic_on(self, user_uuids: list[str], day: date) -> dict[str, int]:
         if not user_uuids:
             return {}
         result = await self._session.execute(
-            select(
-                UserTrafficHourlyModel.user_uuid,
-                func.sum(UserTrafficHourlyModel.delta_bytes).label("total"),
+            select(UserTrafficDailyModel.user_uuid, UserTrafficDailyModel.bytes_consumed).where(
+                UserTrafficDailyModel.user_uuid == any_(_uuid_array(user_uuids)),
+                UserTrafficDailyModel.date == day,
             )
-            .where(
-                UserTrafficHourlyModel.user_uuid == any_(_uuid_array(user_uuids)),
-                UserTrafficHourlyModel.recorded_at > since,
-            )
-            .group_by(UserTrafficHourlyModel.user_uuid)
         )
-        return {row.user_uuid: int(row.total) for row in result.all()}
+        return {row.user_uuid: int(row.bytes_consumed) for row in result.all()}
 
     async def get_alerted_thresholds_since(
         self, user_uuids: list[str], since: datetime
@@ -142,7 +148,7 @@ class PostgresUserTrafficView:
                 UserTrafficThresholdAlertModel.threshold_gb,
             ).where(
                 UserTrafficThresholdAlertModel.user_uuid == any_(_uuid_array(user_uuids)),
-                UserTrafficThresholdAlertModel.alerted_at > since,
+                UserTrafficThresholdAlertModel.alerted_at >= since,
             )
         )
         alerted: dict[str, set[int]] = {}

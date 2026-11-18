@@ -27,7 +27,7 @@ def pick_threshold(total_bytes: int, thresholds_gb: list[int], alerted_gb: set[i
     """Highest crossed threshold, or None if nothing crossed or it was already alerted.
 
     Lower thresholds are implied by the highest one: once 100 was alerted,
-    crossing 30 or 50 again within the window stays silent.
+    crossing 30 or 50 again the same day stays silent.
     """
     crossed = [t for t in thresholds_gb if total_bytes > t * _GB]
     if not crossed:
@@ -55,7 +55,10 @@ def format_threshold_alert(
         header = f"🚨 Возможна перепродажа: <b>{safe_username}</b>"
     else:
         header = f"⚠️ Высокий трафик: <b>{safe_username}</b>"
-    lines = [header, f"За 24 часа: {fmt_bytes(total_bytes)} (порог {threshold_gb} GB)"]
+    lines = [
+        header,
+        f"За сегодня (с 03:00 МСК): {fmt_bytes(total_bytes)} (порог {threshold_gb} GB)",
+    ]
     if spike:
         multiplier_actual = total_bytes / avg_daily_bytes
         lines.append(

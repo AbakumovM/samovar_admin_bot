@@ -1,19 +1,17 @@
 
-from sqlalchemy import delete, insert, update
+from sqlalchemy import delete, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.apps.users.adapters.orm import (
     UserTrafficDailyModel,
-    UserTrafficHourlyModel,
     UserTrafficLastSnapshotModel,
     UserTrafficThresholdAlertModel,
 )
 from src.apps.users.domain.commands import (
-    AddHourlyTraffic,
     MarkAnomalyAlerted,
     MarkThresholdsAlerted,
-    PurgeTrafficHistory,
+    PurgeThresholdAlerts,
     UpdateLastSnapshot,
     UpsertDailyTraffic,
 )
@@ -76,15 +74,6 @@ class PostgresUserTrafficGateway:
         )
         await self._session.flush()
 
-    async def add_hourly_traffic(self, cmd: AddHourlyTraffic) -> None:
-        await self._session.execute(
-            insert(UserTrafficHourlyModel).values(
-                user_uuid=cmd.user_uuid,
-                recorded_at=cmd.recorded_at,
-                delta_bytes=cmd.delta_bytes,
-            )
-        )
-
     async def mark_thresholds_alerted(self, cmd: MarkThresholdsAlerted) -> None:
         if not cmd.thresholds_gb:
             return
@@ -101,10 +90,7 @@ class PostgresUserTrafficGateway:
         await self._session.execute(stmt)
         await self._session.flush()
 
-    async def purge_traffic_history(self, cmd: PurgeTrafficHistory) -> None:
-        await self._session.execute(
-            delete(UserTrafficHourlyModel).where(UserTrafficHourlyModel.recorded_at < cmd.before)
-        )
+    async def purge_threshold_alerts(self, cmd: PurgeThresholdAlerts) -> None:
         await self._session.execute(
             delete(UserTrafficThresholdAlertModel).where(
                 UserTrafficThresholdAlertModel.alerted_at < cmd.before

@@ -97,14 +97,18 @@ restart_attempts >= max_attempts → эскалация 🚨 + стоп (бол�
 
 `src/apps/users/controllers/scheduler/`. Раз в `TRAFFIC_CHECK_INTERVAL_SECONDS`
 (по умолчанию час) считается прирост `usedTrafficBytes` каждого активного
-пользователя с `telegramId` и пишется в `user_traffic_hourly`. Сумма за
-**скользящие 24 часа** сверяется с `TRAFFIC_ALERT_THRESHOLDS_GB` (30/50/100/150).
-Алерт — о наивысшем пройденном пороге, каждый порог не чаще раза в 24ч (пороги
-ниже него тоже считаются отработанными). С `TRAFFIC_CRITICAL_THRESHOLD_GB` —
-заголовок 🚨. Автобана нет: в каждом алерте кнопка «🚫 Заблокировать»
-(`traffic_block:`) — `POST /internal/users/{telegram_id}/block` на samovarbot +
-`POST /connections/drop` в панели, как в антифроде. Строка «Резкий скачок» —
-если сумма за 24ч > `TRAFFIC_ANOMALY_MULTIPLIER` × средний суточный за 7 дней.
+пользователя с `telegramId` и добавляется в `user_traffic_daily` за текущие
+**календарные сутки UTC** (00:00 UTC = 03:00 МСК). Эта сумма сверяется с
+`TRAFFIC_ALERT_THRESHOLDS_GB` (30/50/100/150) — те же цифры, что в ежедневном
+отчёте и `/anomalies`. Алерт — о наивысшем пройденном пороге, каждый порог не
+чаще раза в сутки (пороги ниже него тоже считаются отработанными), в 03:00 МСК
+счётчик обнуляется. С `TRAFFIC_CRITICAL_THRESHOLD_GB` — заголовок 🚨. Автобана
+нет: в каждом алерте кнопка «🚫 Заблокировать» (`traffic_block:`) —
+`POST /internal/users/{telegram_id}/block` на samovarbot + `POST /connections/drop`
+в панели, как в антифроде. Строка «Резкий скачок» — если трафик за сегодня >
+`TRAFFIC_ANOMALY_MULTIPLIER` × средний суточный за 7 дней. `/anomalies` — до 50
+пользователей с алертом за сегодня. Прирост, охвативший простой бота, целиком
+попадает в текущие сутки.
 
 ## Блокировки IP (ТСПУ)
 
@@ -221,8 +225,7 @@ ANTIFRAUD_IP_SLACK_MULTIPLIER)` — «жёсткий» (действие), вы�
 - `muted_nodes` — замьюченные ноды (node_uuid, muted_until)
 - `user_traffic_last_snapshot` — последний снапшот трафика каждого пользователя (для вычисления дельты)
 - `user_traffic_daily` — дневные агрегаты потребления по пользователям (user_uuid, date, bytes_consumed, anomaly_alerted)
-- `user_traffic_hourly` — приросты трафика за каждый тик проверки (user_uuid, recorded_at, delta_bytes), хранится 25ч
-- `user_traffic_threshold_alerts` — какие пороги трафика уже алертились (user_uuid, threshold_gb, alerted_at), хранится 25ч
+- `user_traffic_threshold_alerts` — какие пороги трафика уже алертились (user_uuid, threshold_gb, alerted_at), хранится до конца суток UTC
 - `antifraud_notified_users` — cooldown уведомлений антифрода (remnawave_id, notified_at, soft_notified_at)
 - `antifraud_violation_counts` — накопление нарушений антифрода перед алертом (remnawave_id, count, window_expires_at)
 - `ip_reachability_state` — статус доступности IP плиток из РФ (ip, status, pending_status, pending_count, last_results, changed_at, checked_at, notified_at)
@@ -241,7 +244,7 @@ ESCALATION_WINDOW_MINUTES=60
 ESCALATION_MAX_ATTEMPTS=3
 DAILY_REPORT_HOUR_UTC=17
 TRAFFIC_CHECK_INTERVAL_SECONDS=3600
-TRAFFIC_ALERT_THRESHOLDS_GB=[30,50,100,150]  # Пороги алертов за скользящие 24ч (JSON)
+TRAFFIC_ALERT_THRESHOLDS_GB=[30,50,100,150]  # Пороги алертов за сутки UTC (JSON)
 TRAFFIC_CRITICAL_THRESHOLD_GB=150          # С этого порога — 🚨 «Возможна перепродажа», вне лимита 10 алертов/тик
 TRAFFIC_ANOMALY_MULTIPLIER=2.0
 BILLING_ALERT_DAYS_BEFORE=3      # За сколько дней алертить, по умолчанию: 3

@@ -60,8 +60,7 @@ async def cmd_top_traffic(
 async def cmd_anomalies(
     message: Message, user_traffic_view: FromDishka[UserTrafficView]
 ) -> None:
-    records = await user_traffic_view.get_top_traffic_today(limit=50)
-    alerted = [r for r in records if r.anomaly_alerted]
+    alerted = await user_traffic_view.get_alerted_today(limit=50)
     if not alerted:
         await message.answer("⚠️ Аномалий трафика сегодня нет.")
         return

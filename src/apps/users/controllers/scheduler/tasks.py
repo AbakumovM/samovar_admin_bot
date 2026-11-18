@@ -1,6 +1,6 @@
 import asyncio
 import logging
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, time
 from typing import Any
 
 import httpx
@@ -17,10 +17,9 @@ from src.apps.users.controllers.scheduler.alerts import (
     pick_threshold,
 )
 from src.apps.users.domain.commands import (
-    AddHourlyTraffic,
     MarkAnomalyAlerted,
     MarkThresholdsAlerted,
-    PurgeTrafficHistory,
+    PurgeThresholdAlerts,
     UpdateLastSnapshot,
     UpsertDailyTraffic,
 )
@@ -29,8 +28,6 @@ from src.infrastructure.remnawave.pagination import fetch_all_users_stream
 
 logger = logging.getLogger(__name__)
 
-_WINDOW = timedelta(hours=24)
-_HISTORY_RETENTION = timedelta(hours=25)
 _ALERT_LIMIT = 10  # Prevent Telegram flood if thresholds misconfigured; critical alerts bypass it
 
 
@@ -40,15 +37,6 @@ def _compute_delta(current: int, previous: int) -> int | None:
     if delta < 0:
         return None
     return delta
-
-
-def _is_fresh_snapshot(recorded_at: datetime, now: datetime, interval_seconds: int) -> bool:
-    """False when the previous snapshot is older than two check intervals.
-
-    After bot/panel downtime the delta covers many hours; writing it as one
-    hourly record would inflate the rolling 24h sum and cause false alerts.
-    """
-    return now - recorded_at <= timedelta(seconds=2 * interval_seconds)
 
 
 def _order_and_limit(
@@ -88,6 +76,7 @@ async def _run_traffic_check(
 ) -> None:
     now = datetime.now(UTC)
     today = now.date()  # UTC date — requires server/container to run in UTC (Docker default)
+    day_start = datetime.combine(today, time.min, tzinfo=UTC)
 
     users = await _fetch_all_users(raw_client)
     logger.info("Traffic check: %d active users to process", len(users))
@@ -95,7 +84,7 @@ async def _run_traffic_check(
     # uuid -> (username, telegram_id) for users who consumed traffic this tick
     active: dict[str, tuple[str, int]] = {}
 
-    # Transaction 1: process user snapshots, daily and hourly traffic
+    # Transaction 1: process user snapshots and daily traffic
     async with session_factory() as session:
         async with session.begin():
             gateway = PostgresUserTrafficGateway(session=session)
@@ -137,28 +126,19 @@ async def _run_traffic_check(
                         delta_bytes=delta,
                     )
                 )
-                if not _is_fresh_snapshot(
-                    snapshot.recorded_at, now, config.traffic_check_interval_seconds
-                ):
-                    continue  # Delta spans downtime — keep it out of the rolling 24h window
-                await gateway.add_hourly_traffic(
-                    AddHourlyTraffic(user_uuid=user_uuid, recorded_at=now, delta_bytes=delta)
-                )
                 active[user_uuid] = (username, int(user["telegramId"]))
 
-            await gateway.purge_traffic_history(
-                PurgeTrafficHistory(before=now - _HISTORY_RETENTION)
-            )
+            await gateway.purge_threshold_alerts(PurgeThresholdAlerts(before=day_start))
 
-    # Transaction 2: threshold detection over the rolling 24h window
+    # Transaction 2: threshold detection over today's traffic — the same numbers
+    # as the daily report and /anomalies, thresholds reset at 00:00 UTC
     async with session_factory() as session:
         async with session.begin():
             gateway = PostgresUserTrafficGateway(session=session)
             view = PostgresUserTrafficView(session=session)
 
-            since = now - _WINDOW
-            totals = await view.get_traffic_since(list(active), since)
-            alerted = await view.get_alerted_thresholds_since(list(active), since)
+            totals = await view.get_traffic_on(list(active), today)
+            alerted = await view.get_alerted_thresholds_since(list(active), day_start)
 
             candidates: list[ThresholdAlert] = []
             for user_uuid, total in totals.items():

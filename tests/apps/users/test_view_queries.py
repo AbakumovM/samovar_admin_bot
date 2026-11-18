@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from unittest.mock import AsyncMock, MagicMock
 
 from sqlalchemy.dialects import postgresql
@@ -26,10 +26,10 @@ def _session() -> MagicMock:
     return session
 
 
-async def test_get_traffic_since_uses_single_array_param() -> None:
+async def test_get_traffic_on_uses_single_array_param() -> None:
     session = _session()
 
-    await PostgresUserTrafficView(session).get_traffic_since(_MANY_UUIDS, datetime.now(UTC))
+    await PostgresUserTrafficView(session).get_traffic_on(_MANY_UUIDS, date.today())
 
     assert _captured_param_count(session) <= 2
 
@@ -42,3 +42,14 @@ async def test_get_alerted_thresholds_since_uses_single_array_param() -> None:
     )
 
     assert _captured_param_count(session) <= 2
+
+
+async def test_get_alerted_today_filters_alerted_before_limit() -> None:
+    session = _session()
+    session.execute.return_value.scalars = MagicMock(return_value=MagicMock(all=lambda: []))
+
+    await PostgresUserTrafficView(session).get_alerted_today(limit=50)
+
+    sql = str(session.execute.await_args.args[0].compile(dialect=postgresql.asyncpg.dialect()))
+    assert "anomaly_alerted IS true" in sql
+    assert "LIMIT" in sql
