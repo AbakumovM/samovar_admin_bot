@@ -47,8 +47,8 @@ async def cmd_top_traffic(
         await message.answer("Данных о трафике пока нет.")
         return
 
-    label_map = {"day": "24ч", "week": "7 дней", "month": "30 дней"}
-    label = label_map.get(period_key, "24ч")
+    label_map = {"day": "сегодня", "week": "7 дней", "month": "30 дней"}
+    label = label_map.get(period_key, "сегодня")
     lines = [f"📊 Топ потребителей трафика ({label})\n"]
     for i, rec in enumerate(records, 1):
         lines.append(f"{i}. <b>{html.escape(rec.username)}</b> — {_fmt_bytes(rec.bytes_consumed)}")
